@@ -43,23 +43,31 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget()
+        central.setObjectName("Central")
         self.setCentralWidget(central)
         root_layout = QHBoxLayout(central)
+        root_layout.setContentsMargins(16, 16, 16, 16)
 
         # --- 왼쪽: 파일 목록 패널 ---
         left_panel = QWidget()
+        left_panel.setObjectName("Sidebar")
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(16, 16, 16, 16)
+        left_layout.setSpacing(10)
+
+        left_layout.addWidget(QLabel("파일", objectName="SidebarTitle"))
 
         open_button = QPushButton("파일 열기")
         open_button.clicked.connect(self._open_files_dialog)
         left_layout.addWidget(open_button)
 
         drop_hint = QLabel("여기에 CSV/Excel 파일을\n드래그 앤 드롭하세요")
+        drop_hint.setObjectName("DropHint")
         drop_hint.setAlignment(Qt.AlignCenter)
-        drop_hint.setStyleSheet("color: gray; border: 1px dashed gray; padding: 12px;")
         left_layout.addWidget(drop_hint)
 
         self._file_list = QListWidget()
+        self._file_list.setObjectName("FileList")
         left_layout.addWidget(self._file_list)
 
         remove_button = QPushButton("선택 파일 제거")
@@ -67,6 +75,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(remove_button)
 
         combine_button = QPushButton("결합하기")
+        combine_button.setObjectName("PrimaryButton")
         combine_button.clicked.connect(self._combine_and_display)
         left_layout.addWidget(combine_button)
 
@@ -76,31 +85,41 @@ class MainWindow(QMainWindow):
         self._table_view = QTableView()
         self._table_view.setModel(self._table_model)
         self._table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._table_view.setAlternatingRowColors(True)
+        self._table_view.horizontalHeader().setStretchLastSection(True)
+        self._table_view.verticalHeader().setVisible(False)
 
         # --- 오른쪽: 축 선택 + 그래프 ---
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
 
-        axis_layout = QHBoxLayout()
-        axis_layout.addWidget(QLabel("X축:"))
+        right_layout.addWidget(QLabel("X축", objectName="SectionLabel"))
         self._x_combo = QComboBox()
         self._x_combo.currentTextChanged.connect(self._on_x_changed)
-        axis_layout.addWidget(self._x_combo)
-        right_layout.addLayout(axis_layout)
+        right_layout.addWidget(self._x_combo)
 
-        right_layout.addWidget(QLabel("Y축 (체크하면 그래프에 표시/숨김):"))
+        right_layout.addWidget(QLabel("Y축 (체크하면 그래프에 표시/숨김)", objectName="SectionLabel"))
         self._y_list = QListWidget()
+        self._y_list.setObjectName("YList")
         self._y_list.setSelectionMode(QAbstractItemView.NoSelection)
         self._y_list.setMaximumHeight(120)
         self._y_list.itemChanged.connect(self._on_y_item_changed)
         right_layout.addWidget(self._y_list)
 
         plot_button = QPushButton("그래프 새로고침")
+        plot_button.setObjectName("SecondaryButton")
         plot_button.clicked.connect(self._update_plot)
         right_layout.addWidget(plot_button)
 
+        plot_card = QWidget()
+        plot_card.setObjectName("PlotCard")
+        plot_card_layout = QVBoxLayout(plot_card)
+        plot_card_layout.setContentsMargins(8, 8, 8, 8)
         self._plot_canvas = PlotCanvas()
-        right_layout.addWidget(self._plot_canvas)
+        plot_card_layout.addWidget(self._plot_canvas)
+        right_layout.addWidget(plot_card, stretch=1)
 
         splitter = QSplitter()
         splitter.addWidget(left_panel)
@@ -108,6 +127,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(1, 2)
         splitter.setStretchFactor(2, 2)
+        splitter.setHandleWidth(16)
         root_layout.addWidget(splitter)
 
     # --- 드래그앤드롭 ---

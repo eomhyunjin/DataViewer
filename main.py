@@ -4,10 +4,12 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from app.main_window import MainWindow
+from app.theme import STYLESHEET
 
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setStyleSheet(STYLESHEET)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
