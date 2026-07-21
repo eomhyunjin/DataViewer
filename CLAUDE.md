@@ -57,3 +57,7 @@ Windows 단일 실행파일(exe) 빌드 (PyInstaller, onefile, 콘솔창 없음)
 5. `gh release create vX.Y.Z dist/DataViewer.exe --repo eomhyunjin/DataViewer --title "vX.Y.Z" --notes "..."`로 GitHub Release를 만들고 exe를 첨부 (release notes는 CHANGELOG.md의 해당 버전 내용을 재사용)
 
 exe 자체는 git에 커밋하지 않고 GitHub Releases로만 배포합니다 — Python 설치 없이 Releases 페이지에서 exe를 내려받아 바로 실행할 수 있게 하기 위함입니다.
+
+## 작업 기록
+
+작업(코드 변경, 버그 수정, 기능 추가 등)을 할 때마다 `WORKLOG.md`에 날짜별로 무엇을 했는지 짧게 남깁니다. `CHANGELOG.md`가 릴리스 단위의 사용자 대상 요약이라면, `WORKLOG.md`는 릴리스 여부와 무관하게 매 작업마다 남기는 더 잘게 쪼갠 개발 로그입니다.
