@@ -1,46 +1,46 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+이 파일은 이 저장소에서 작업하는 Claude Code(claude.ai/code)에게 제공하는 가이드입니다.
 
-## What this is
+## 이 프로젝트는
 
-A Windows desktop app (PySide6) that loads multiple CSV/Excel files, concatenates them into one table (row-wise), and plots selected columns as a line chart. Files must share the same column structure to be combined — see "Combine semantics" below.
+여러 개의 CSV/Excel 파일을 불러와 하나의 표로 이어붙이고(행 단위), 선택한 컬럼을 선 그래프로 그려주는 Windows 데스크톱 앱(PySide6)입니다. 결합하려면 파일들의 열 구조가 완전히 같아야 합니다 — 아래 "결합 로직" 참고.
 
-## Commands
+## 명령어
 
-Install dependencies (project uses a `.venv` virtualenv, not global site-packages):
+의존성 설치 (전역 site-packages가 아니라 `.venv` 가상환경 사용):
 ```bash
 python -m venv .venv
 ./.venv/Scripts/pip install -r requirements.txt
 ```
 
-Run the app:
+앱 실행:
 ```bash
 ./.venv/Scripts/python main.py
 ```
 
-Build a standalone Windows exe (PyInstaller, one-file, no console window):
+Windows 단일 실행파일(exe) 빌드 (PyInstaller, onefile, 콘솔창 없음):
 ```bash
 ./.venv/Scripts/pip install pyinstaller
 ./.venv/Scripts/pyinstaller --noconfirm --onefile --windowed --name DataViewer main.py
 ```
-Output goes to `dist/DataViewer.exe`. `build/`, `dist/`, and `*.spec` are gitignored — the exe is a local build artifact, not committed.
+결과물은 `dist/DataViewer.exe`에 생성됩니다. `build/`, `dist/`, `*.spec`은 `.gitignore`에 포함되어 있습니다 — exe는 로컬 빌드 산출물일 뿐 커밋 대상이 아닙니다.
 
-There is no test suite and no linter configured in this repo. The most useful manual check for data logic is exercising `app/data_loader.py`'s `load_files`/`combine_frames` directly with sample files (see `sample_data/` for two matching-schema `.xlsx` fixtures).
+테스트 스위트와 린터는 아직 구성되어 있지 않습니다. 데이터 로직을 확인할 때 가장 유용한 방법은 `app/data_loader.py`의 `load_files`/`combine_frames`를 샘플 파일로 직접 실행해보는 것입니다 (`sample_data/`에 열 구조가 같은 `.xlsx` 샘플 2개가 있습니다).
 
-## Architecture
+## 아키텍처
 
-Four modules under `app/`, wired together by `main_window.MainWindow`:
+`app/` 아래 4개 모듈이 있고, `main_window.MainWindow`가 이들을 엮어 조립합니다.
 
-- **`data_loader.py`** — pure pandas logic, no Qt dependency. `load_files()` reads each path via `pd.read_csv`/`pd.read_excel` based on extension, collecting per-file errors instead of raising. `combine_frames()` concatenates row-wise but only across files whose column tuples exactly match the first file's; mismatched files are dropped from the result and their paths returned separately so the UI can warn about them. There is no column-remapping or alignment — schema must match exactly.
-- **`table_model.py`** — `PandasTableModel(QAbstractTableModel)` is a thin read-only adapter exposing a DataFrame to `QTableView`.
-- **`plot_canvas.py`** — `PlotCanvas(FigureCanvasQTAgg)` embeds a matplotlib figure in Qt. `plot_lines()` coerces each requested Y column with `pd.to_numeric(errors="coerce")`; columns that end up all-NaN are skipped and returned to the caller (so the UI can report which ones were dropped) instead of raising. Module-level `plt.rcParams["font.family"] = "Malgun Gothic"` is set so Hangul labels don't render as missing-glyph boxes — don't remove this without another CJK-capable font in place.
-- **`main_window.py`** — owns all UI state and orchestration. Key non-obvious behavior:
-  - X-axis combo and Y-axis checklist are mutually exclusive: whichever column is selected as X is excluded from the Y list (`_refresh_y_list`), and switching X rebuilds the Y list.
-  - Y-axis check state persists across rebuilds in `self._y_checked` (dict keyed by column name), defaulting new/unseen columns to checked. This is what makes "all columns shown after combine" and "toggle a column in/out without losing other selections" work.
-  - The plot updates reactively (`_update_plot`) on every X change or Y checkbox toggle — there's no separate "confirm selection" step; the "그래프 새로고침" button is just a manual re-trigger of the same method.
-  - Drag-and-drop requires overriding **both** `dragEnterEvent` and `dragMoveEvent` (both must call `acceptProposedAction()`). Qt's default `dragMoveEvent` ignores the event, which silently blocks `dropEvent` from firing even when `dragEnterEvent` accepted — this is a real gotcha, not defensive boilerplate.
+- **`data_loader.py`** — Qt에 의존하지 않는 순수 pandas 로직. `load_files()`는 확장자에 따라 `pd.read_csv`/`pd.read_excel`로 각 경로를 읽고, 실패하면 예외를 던지는 대신 파일별 오류를 모아서 반환합니다. `combine_frames()`는 행 단위로 이어붙이되, 첫 번째 파일과 열(컬럼) 튜플이 정확히 일치하는 파일들끼리만 결합합니다. 열 구조가 다른 파일은 결과에서 제외되고, 그 경로들을 별도로 반환해 UI가 경고할 수 있게 합니다. 컬럼 재매핑이나 정렬 기능은 없으며 스키마가 완전히 일치해야만 합니다.
+- **`table_model.py`** — `PandasTableModel(QAbstractTableModel)`은 DataFrame을 `QTableView`에 보여주는 읽기 전용 어댑터입니다.
+- **`plot_canvas.py`** — `PlotCanvas(FigureCanvasQTAgg)`는 matplotlib figure를 Qt에 임베드합니다. `plot_lines()`는 요청받은 각 Y 컬럼을 `pd.to_numeric(errors="coerce")`로 강제 변환하고, 전부 NaN이 되어버린 컬럼은 예외를 던지지 않고 건너뛴 뒤 호출자에게 돌려줍니다(어떤 컬럼이 제외됐는지 UI가 알릴 수 있도록). 모듈 최상단의 `plt.rcParams["font.family"] = "Malgun Gothic"` 설정은 한글 라벨이 깨진 네모(□)로 나오지 않게 하기 위한 것이니, 다른 한중일 폰트로 대체하지 않는 한 제거하면 안 됩니다.
+- **`main_window.py`** — 모든 UI 상태와 흐름을 담당합니다. 눈에 잘 안 띄는 핵심 동작:
+  - X축 콤보박스와 Y축 체크리스트는 서로 배타적입니다: X축으로 선택된 컬럼은 Y축 목록에서 제외되고(`_refresh_y_list`), X축을 바꾸면 Y축 목록이 다시 만들어집니다.
+  - Y축 체크 상태는 목록이 다시 만들어져도 `self._y_checked`(컬럼명을 키로 하는 dict)에 유지되며, 처음 보는 컬럼은 기본으로 체크된 상태입니다. 이 덕분에 "결합 직후 전체 컬럼 표시"와 "다른 선택은 유지한 채 특정 컬럼만 껐다 켜기"가 동작합니다.
+  - 그래프는 X축 변경이나 Y축 체크박스 토글이 있을 때마다 즉시 갱신됩니다(`_update_plot`) — 별도의 "선택 확정" 단계가 없습니다. "그래프 새로고침" 버튼은 같은 메서드를 수동으로 다시 호출할 뿐입니다.
+  - 드래그앤드롭이 동작하려면 `dragEnterEvent`와 `dragMoveEvent` **둘 다** 오버라이드해서 `acceptProposedAction()`을 호출해야 합니다. Qt의 기본 `dragMoveEvent`는 이벤트를 무시하도록 되어 있어서, `dragEnterEvent`가 수락했더라도 `dropEvent`가 조용히 발생하지 않게 막습니다 — 이건 방어적 보일러플레이트가 아니라 실제로 겪은 함정이니 지우지 마세요.
 
-`main.py` is a minimal entry point (`QApplication` + `MainWindow().show()`).
+`main.py`는 최소한의 진입점입니다 (`QApplication` + `MainWindow().show()`).
 
-Everything currently runs synchronously on the Qt main thread — loading/combining large files will freeze the UI. If large-file handling becomes a requirement, that's the place to introduce a worker thread.
+현재 모든 처리는 Qt 메인 스레드에서 동기적으로 실행됩니다 — 큰 파일을 불러오거나 결합하면 UI가 멈춥니다. 대용량 파일 처리가 필요해지면 이 부분에 워커 스레드를 도입해야 합니다.
