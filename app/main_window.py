@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app import __version__
 from app.data_loader import combine_frames, is_supported_file, load_files
 from app.plot_canvas import PlotCanvas
 from app.table_model import PandasTableModel
@@ -30,7 +31,7 @@ from app.table_model import PandasTableModel
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DataViewer")
+        self.setWindowTitle(f"DataViewer v{__version__}")
         self.resize(1100, 700)
         self.setAcceptDrops(True)
 
