@@ -1,9 +1,14 @@
 """matplotlib 선 그래프를 Qt 위젯에 임베드."""
 from __future__ import annotations
 
+import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+
+# Windows 기본 한글 폰트로 설정해 축/범례의 한글이 깨지지 않도록 한다.
+plt.rcParams["font.family"] = "Malgun Gothic"
+plt.rcParams["axes.unicode_minus"] = False
 
 
 class PlotCanvas(FigureCanvasQTAgg):
@@ -34,3 +39,7 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.ax.tick_params(axis="x", rotation=45)
         self.draw()
         return skipped
+
+    def clear(self) -> None:
+        self.ax.clear()
+        self.draw()

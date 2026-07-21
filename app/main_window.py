@@ -4,13 +4,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -34,6 +36,7 @@ class MainWindow(QMainWindow):
 
         self._loaded_frames: dict[str, object] = {}
         self._table_model = PandasTableModel()
+        self._y_checked: dict[str, bool] = {}
 
         self._build_ui()
 
@@ -79,18 +82,20 @@ class MainWindow(QMainWindow):
 
         axis_layout = QHBoxLayout()
         axis_layout.addWidget(QLabel("X축:"))
-        self._x_combo = self._make_combo()
+        self._x_combo = QComboBox()
+        self._x_combo.currentTextChanged.connect(self._on_x_changed)
         axis_layout.addWidget(self._x_combo)
         right_layout.addLayout(axis_layout)
 
-        right_layout.addWidget(QLabel("Y축 (여러 개 선택 가능):"))
+        right_layout.addWidget(QLabel("Y축 (체크하면 그래프에 표시/숨김):"))
         self._y_list = QListWidget()
-        self._y_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self._y_list.setSelectionMode(QAbstractItemView.NoSelection)
         self._y_list.setMaximumHeight(120)
+        self._y_list.itemChanged.connect(self._on_y_item_changed)
         right_layout.addWidget(self._y_list)
 
-        plot_button = QPushButton("그래프 그리기")
-        plot_button.clicked.connect(self._plot_selected)
+        plot_button = QPushButton("그래프 새로고침")
+        plot_button.clicked.connect(self._update_plot)
         right_layout.addWidget(plot_button)
 
         self._plot_canvas = PlotCanvas()
@@ -104,19 +109,20 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(2, 2)
         root_layout.addWidget(splitter)
 
-    def _make_combo(self):
-        from PySide6.QtWidgets import QComboBox
-
-        combo = QComboBox()
-        return combo
-
-    # --- 파일 추가/제거 ---
+    # --- 드래그앤드롭 ---
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        # dragEnterEvent만 구현하면 Qt 기본 동작이 드래그 중 계속 거부 상태를
+        # 유지해서 실제 dropEvent가 발생하지 않는다. 이동 중에도 매번 수락해야 한다.
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
         paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
+        event.acceptProposedAction()
         self._add_files(paths)
 
     def _open_files_dialog(self) -> None:
@@ -170,21 +176,57 @@ class MainWindow(QMainWindow):
             )
 
         columns = list(result.data.columns)
+        self._y_checked = {c: True for c in columns}  # 처음엔 전체 표시
+
+        self._x_combo.blockSignals(True)
         self._x_combo.clear()
         self._x_combo.addItems(columns)
-        self._y_list.clear()
-        self._y_list.addItems(columns)
+        self._x_combo.blockSignals(False)
 
-    def _plot_selected(self) -> None:
+        self._refresh_y_list()
+        self._update_plot()
+
+    # --- X/Y축 선택 ---
+    def _on_x_changed(self, _text: str) -> None:
+        self._refresh_y_list()
+        self._update_plot()
+
+    def _refresh_y_list(self) -> None:
+        """Y축 목록을 채운다. 현재 X축으로 선택된 열은 목록에서 제외한다."""
+        x_column = self._x_combo.currentText()
+        columns = list(self._table_model.dataframe().columns)
+
+        self._y_list.blockSignals(True)
+        self._y_list.clear()
+        for column in columns:
+            if column == x_column:
+                continue
+            item = QListWidgetItem(column)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            checked = self._y_checked.get(column, True)
+            item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+            self._y_list.addItem(item)
+        self._y_list.blockSignals(False)
+
+    def _on_y_item_changed(self, item: QListWidgetItem) -> None:
+        self._y_checked[item.text()] = item.checkState() == Qt.Checked
+        self._update_plot()
+
+    # --- 그래프 ---
+    def _update_plot(self) -> None:
         data = self._table_model.dataframe()
         if data.empty:
-            QMessageBox.information(self, "그래프", "먼저 파일을 결합해주세요.")
             return
 
         x_column = self._x_combo.currentText()
-        y_columns = [item.text() for item in self._y_list.selectedItems()]
+        y_columns = [
+            self._y_list.item(i).text()
+            for i in range(self._y_list.count())
+            if self._y_list.item(i).checkState() == Qt.Checked
+        ]
+
         if not x_column or not y_columns:
-            QMessageBox.information(self, "그래프", "X축과 Y축을 선택해주세요.")
+            self._plot_canvas.clear()
             return
 
         skipped = self._plot_canvas.plot_lines(data, x_column, y_columns)
