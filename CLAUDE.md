@@ -50,9 +50,10 @@ Windows 단일 실행파일(exe) 빌드 (PyInstaller, onefile, 콘솔창 없음)
 버전 문자열은 `app/__init__.py`의 `__version__`에 있고, 창 제목(`DataViewer v{__version__}`)에 표시됩니다. 시맨틱 버저닝(`v0.1.0`, `v0.2.0`, ...)을 따릅니다.
 
 기능이 안정될 때마다 아래 순서로 릴리스합니다:
-1. `app/__init__.py`의 `__version__` 값을 올리고 커밋/푸시
-2. `git tag -a vX.Y.Z -m "..."` 로 태그를 만들고 `git push origin vX.Y.Z`로 푸시
-3. `./.venv/Scripts/pyinstaller --noconfirm --onefile --windowed --name DataViewer main.py`로 exe 빌드
-4. `gh release create vX.Y.Z dist/DataViewer.exe --repo eomhyunjin/DataViewer --title "vX.Y.Z" --notes "..."`로 GitHub Release를 만들고 exe를 첨부
+1. `CHANGELOG.md`에 새 버전 섹션을 추가하고 이번 버전에서 추가/변경/수정된 내용을 정리
+2. `app/__init__.py`의 `__version__` 값을 올리고 커밋/푸시
+3. `git tag -a vX.Y.Z -m "..."` 로 태그를 만들고 `git push origin vX.Y.Z`로 푸시
+4. `./.venv/Scripts/pyinstaller --noconfirm --onefile --windowed --name DataViewer main.py`로 exe 빌드
+5. `gh release create vX.Y.Z dist/DataViewer.exe --repo eomhyunjin/DataViewer --title "vX.Y.Z" --notes "..."`로 GitHub Release를 만들고 exe를 첨부 (release notes는 CHANGELOG.md의 해당 버전 내용을 재사용)
 
 exe 자체는 git에 커밋하지 않고 GitHub Releases로만 배포합니다 — Python 설치 없이 Releases 페이지에서 exe를 내려받아 바로 실행할 수 있게 하기 위함입니다.
