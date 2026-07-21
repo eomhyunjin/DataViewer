@@ -20,3 +20,5 @@
 - `CLAUDE.md`에 버전 관리 & 릴리스 절차 문서화
 - `CHANGELOG.md` 생성 및 릴리스 절차에 편입
 - 이 `WORKLOG.md` 생성
+- `CLAUDE.md`에 기록 규칙(작업 확정 시마다 WORKLOG/CHANGELOG 기록) 명문화
+- UI 리디자인: 사용자가 제공한 참고 이미지(어두운 사이드바 + 밝은 콘텐츠의 SaaS 대시보드 컨셉)를 바탕으로 `app/theme.py`에 QSS 스타일시트 작성, `main_window.py`에 오브젝트 이름 부여 및 레이아웃 여백 정리, `main.py`에서 앱 전체에 스타일 적용. 실제 실행 후 스크린샷으로 확인

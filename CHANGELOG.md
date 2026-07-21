@@ -2,6 +2,11 @@
 
 이 프로젝트의 버전별 주요 변경 사항을 기록합니다. [Keep a Changelog](https://keepachangelog.com/) 형식을 따르고, [시맨틱 버저닝](https://semver.org/lang/ko/)을 사용합니다.
 
+## [Unreleased]
+
+### Changed
+- 어두운 사이드바 + 밝은 콘텐츠 영역의 모던 SaaS 대시보드 스타일로 UI 리디자인
+
 ## [v0.1.0] - 2026-07-21
 
 ### Added
