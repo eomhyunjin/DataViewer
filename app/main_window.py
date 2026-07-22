@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import __version__
-from app.data_loader import combine_frames, is_supported_file, load_files
+from app.data_loader import combine_frames, is_supported_file, load_files, numeric_columns
 from app.plot_canvas import PlotCanvas
 from app.table_model import PandasTableModel
 
@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
         self._loaded_frames: dict[str, object] = {}
         self._table_model = PandasTableModel()
         self._y_checked: dict[str, bool] = {}
+        self._numeric_columns: set[str] = set()
 
         self._build_ui()
 
@@ -197,7 +198,8 @@ class MainWindow(QMainWindow):
             )
 
         columns = list(result.data.columns)
-        self._y_checked = {c: True for c in columns}  # 처음엔 전체 표시
+        self._numeric_columns = set(numeric_columns(result.data))
+        self._y_checked = {c: False for c in columns}  # 사용자가 체크하기 전까진 그래프를 그리지 않음
 
         self._x_combo.blockSignals(True)
         self._x_combo.clear()
@@ -205,7 +207,7 @@ class MainWindow(QMainWindow):
         self._x_combo.blockSignals(False)
 
         self._refresh_y_list()
-        self._update_plot()
+        self._plot_canvas.clear()  # 이전 결합 결과로 그려져 있던 그래프가 남아있지 않도록 비운다
 
     # --- X/Y축 선택 ---
     def _on_x_changed(self, _text: str) -> None:
@@ -213,18 +215,18 @@ class MainWindow(QMainWindow):
         self._update_plot()
 
     def _refresh_y_list(self) -> None:
-        """Y축 목록을 채운다. 현재 X축으로 선택된 열은 목록에서 제외한다."""
+        """Y축 목록을 채운다. 현재 X축으로 선택된 열과 숫자로 그릴 수 없는 열은 제외한다."""
         x_column = self._x_combo.currentText()
         columns = list(self._table_model.dataframe().columns)
 
         self._y_list.blockSignals(True)
         self._y_list.clear()
         for column in columns:
-            if column == x_column:
+            if column == x_column or column not in self._numeric_columns:
                 continue
             item = QListWidgetItem(column)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            checked = self._y_checked.get(column, True)
+            checked = self._y_checked.get(column, False)
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
             self._y_list.addItem(item)
         self._y_list.blockSignals(False)

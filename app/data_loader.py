@@ -68,3 +68,12 @@ def combine_frames(frames: dict[str, pd.DataFrame]) -> CombineResult:
 
     combined = pd.concat(matching, ignore_index=True)
     return CombineResult(data=combined, mismatched_files=mismatched)
+
+
+def numeric_columns(df: pd.DataFrame) -> list[str]:
+    """숫자로 변환 가능한 값이 하나라도 있는 컬럼만 원래 순서대로 반환한다(Y축 후보용).
+
+    Status, Save Period처럼 항상 텍스트뿐인 컬럼은 그래프에 그릴 수 없으므로 아예
+    후보에서 제외한다.
+    """
+    return [c for c in df.columns if pd.to_numeric(df[c], errors="coerce").notna().any()]
