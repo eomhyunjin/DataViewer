@@ -21,6 +21,23 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.figure = Figure(figsize=(5, 4), tight_layout=True)
         super().__init__(self.figure)
         self.ax = self.figure.add_subplot(111)
+        self.mpl_connect("scroll_event", self._on_scroll)
+
+    def _on_scroll(self, event) -> None:
+        """마우스 커서 위치를 중심으로 휠 확대/축소한다 (위로: 확대, 아래로: 축소).
+
+        부분 확대(드래그 사각형)와 이동/원래대로는 NavigationToolbar2QT 버튼이 담당하고,
+        이건 그 사이의 빠른 확대/축소 조작을 보완한다.
+        """
+        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+            return
+        zoom_factor = 0.85 if event.button == "up" else 1 / 0.85
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        x, y = event.xdata, event.ydata
+        self.ax.set_xlim(x - (x - xlim[0]) * zoom_factor, x + (xlim[1] - x) * zoom_factor)
+        self.ax.set_ylim(y - (y - ylim[0]) * zoom_factor, y + (ylim[1] - y) * zoom_factor)
+        self.draw_idle()
 
     def plot_lines(self, data: pd.DataFrame, x_column: str, y_columns: list[str]) -> list[str]:
         """x_column 기준으로 y_columns를 선 그래프로 그린다.

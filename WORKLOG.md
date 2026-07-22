@@ -14,7 +14,28 @@
   - `app/main_window.py`: `_refresh_y_list`가 `numeric_columns` 기준으로 목록을 필터링하도록 변경. 결합 직후 Y축 체크 상태를 전부 미체크로 초기화하고 `_combine_and_display`에서 `_update_plot` 자동 호출을 제거(대신 `_plot_canvas.clear()`로 이전 그래프만 정리) — 사용자가 실제로 체크한 컬럼만 그래프에 나타남
   - `CLAUDE.md`의 `main_window.py`/`data_loader.py`/`plot_canvas.py` 설명을 최신 동작에 맞춰 갱신
   - 실측(샘플 데이터 5개, 128만 행): 결합 직후 그래프 0개 라인으로 시작, 체크박스 하나 체크 시 0.2초 만에 해당 라인 표시 확인
-- `DataViewer.exe` 재빌드(위 두 변경 반영)
+- 기능 추가: 그래프 확대/축소
+  - `app/main_window.py`: 그래프 위에 matplotlib `NavigationToolbar2QT` 추가 — 부분 확대(드래그 사각형), 이동, 원래대로/이전/다음 보기, 저장 버튼 제공
+  - `app/plot_canvas.py`: `scroll_event`를 연결해 마우스 커서 위치를 중심으로 휠로 확대/축소하는 `_on_scroll` 추가
+  - 헤드리스 Qt(`QT_QPA_PLATFORM=offscreen`)로 스크린샷을 찍어 툴바와 그래프가 정상 렌더링되는지, 휠 확대/축소로 xlim이 좁아지고/넓어지는지 실측 확인
+- 버그 수정: "원래대로"(Home) 버튼이 원래 그래프로 안 돌아오는 문제 수정
+  - 원인: matplotlib 툴바는 사용자가 툴바의 이동/부분 확대를 처음 드래그할 때만 기준 뷰(홈)를 자동으로 기록하는데, 마우스 휠 확대(`PlotCanvas._on_scroll`)는 툴바를 거치지 않아 휠로만 확대한 경우 기준이 아예 안 잡혀 있었음
+  - `app/main_window.py`: `_update_plot`에서 그래프를 새로 그릴 때마다 `self._plot_toolbar.update()`로 기록을 지우고 `push_current()`로 지금 이 전체 보기를 기준으로 다시 등록하도록 수정
+  - 검증: 헤드리스로 툴바를 전혀 안 쓰고 휠로만 5번 확대한 뒤 `toolbar.home()` 호출 → 원래 xlim/ylim으로 정확히 복원됨을 실측 확인(수정 전에는 복원 안 됨)
+- 기능 변경: 파일 목록 표시를 전체 경로에서 파일명으로 변경, 그래프 툴바에서 이전/다음 보기 버튼 제거
+  - `app/main_window.py`: 파일 목록 아이템은 `Path(path_str).name`을 텍스트로 보여주고, 결합/제거에 쓰는 실제 전체 경로는 `item.setData(_FILE_PATH_ROLE, path_str)`로 따로 보관. `_remove_selected_files`도 이 데이터로 조회하도록 변경
+  - `_PlotToolbar(NavigationToolbar2QT)` 서브클래스를 추가해 `toolitems`에서 Back/Forward만 제외(실제로는 `_update_plot`이 매번 `toolbar.update()`로 뷰 기록을 지우기 때문에 항상 비활성이었음)
+  - 검증: 실제 샘플 CSV로 파일 목록에 파일명만 뜨는지, 제거가 전체 경로 기준으로 여전히 정상 동작하는지, 툴바 버튼 목록이 `[Home, Pan, Zoom, Subplots, Save]`인지 실측 확인
+  - 처음에 Customize(Figure options) 버튼도 같이 뺐다가, 사용자가 명시적으로 유지를 원해 되돌림(아래 항목 참고)
+- 조사: Customize(Figure options)의 "(Re-)Generate automatic legend" 체크 해제 시 범례가 원래 위치로 안 돌아오는 문제
+  - 원인은 우리 코드 버그가 아니라 matplotlib `figureoptions.py`의 다이얼로그 설계: 이 체크박스는 켜짐/꺼짐을 유지하는 토글이 아니라 열 때마다 항상 미체크로 초기화되는 "지금 다시 그려라" 일회성 트리거임. 체크 후 OK를 누르면 `axes.legend(ncols=...)`를 loc 없이 호출해 matplotlib 기본 위치(`best`)로 다시 그리는데, 우리 기본값(`loc="upper right"`)과 달라서 "왼쪽으로 이동한 것처럼" 보임. 체크 해제 후 OK는 단순히 "이번엔 재생성 안 함"일 뿐 되돌리기 로직이 없어서 이동한 채로 남음
+  - Customize 버튼 자체를 없애는 대신 그대로 유지하기로 함(사용자 요청). 대신 이미 있는 "그래프 새로고침" 버튼(또는 X축/Y축 체크박스 변경)을 누르면 `_update_plot` → `plot_lines`가 `ax.clear()` 후 `loc="upper right"`로 처음부터 다시 그리므로 그게 실질적인 복구 방법임을 확인
+  - 검증: 실제 데이터로 legend 위치 코드가 `1`(upper right, 우리 기본값) → Customize의 "재생성" 동작 재현 후 `0`(best) → "그래프 새로고침" 재현(`_update_plot` 재호출) 후 다시 `1`로 돌아오는 것을 실측 확인. `CLAUDE.md`에 이 matplotlib 다이얼로그의 함정과 복구 방법을 기록
+- 기능 변경: Figure options(Customize)에서 X/Y축 Scale(linear/log/symlog/logit) 설정 기능 제거
+  - matplotlib 내장 다이얼로그는 필드 단위로 뺄 수 있는 공개 API가 없어서, `app/figure_options.py`에 `figureoptions.figure_edit` 전체를 그대로 옮겨온 뒤 Scale 드롭다운만 제거한 버전을 새로 만듦(`apply_callback`의 축당 필드 수를 4개→3개로 조정)
+  - `app/main_window.py`: `_PlotToolbar.edit_parameters()`를 오버라이드해서 Customize 버튼이 matplotlib 기본 다이얼로그 대신 이 버전을 열도록 변경
+  - 검증: `_formlayout.fedit`을 가짜로 바꿔치기해서 다이얼로그에 전달되는 필드 목록에 "Scale"이 없는지, 필드 개수가 예상대로(13개: Title+sep+축당 5개×2+범례 체크)인지, 그리고 실제 제출값 형태로 `apply_callback`을 호출했을 때 제목/Min/Max/Label/범례가 Scale 없이도 정상 적용되는지 실측 확인
+- `DataViewer.exe` 재빌드(위 변경들 반영)
 
 ## 2026-07-21
 
