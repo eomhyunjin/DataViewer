@@ -2,6 +2,25 @@
 
 세션/작업 단위로 무엇을 했는지 기록합니다. 릴리스 시점의 사용자 대상 변경 요약은 `CHANGELOG.md`를 참고하세요. 이 파일은 그보다 더 잘게, 작업할 때마다 남기는 개발 로그입니다.
 
+## 2026-07-23
+
+- 기능 추가: CSV/Excel 파일을 MDF(.mf4)로 변환해서 캐시처럼 저장하는 기능
+  - `app/data_loader.py`: `convert_to_mdf()`(DataFrame -> 컬럼별 `Signal` 생성 후 저장)와 `read_mdf()`(MDF -> DataFrame) 추가. `SUPPORTED_SUFFIXES`에 `.mf4`/`.mdf` 포함
+  - 사전 조사(실측): CSV는 pandas C 파서가 이미 빨라 MDF 캐싱 이득이 없었지만, Excel(.xlsx)은 openpyxl의 셀 단위 XML 파싱이 병목이라 실측상 재로딩이 크게 빨라짐(100,000행 xlsx 기준 3.7초 -> 0.19초, 실제 86,206행 79컬럼 운전 데이터 기준 17.8초 -> 0.30초, 약 60배)
+  - 실전에서 겪은 asammdf(8.8.22) 함정과 대응: (1) pandas 3.0 문자열 dtype과 안 맞아 DataFrame을 통째로 못 넘겨서 컬럼별로 수동 `Signal` 생성, 문자열은 UTF-8 bytes로 인코딩한 고정폭 numpy `'S'` 배열로 변환(object dtype bytes 배열은 거부됨), (2) `MDF.save()`가 지정 확장자를 무시하고 항상 `.mf4`로 저장, (3) `MDF.to_dataframe()`이 채널을 숫자형 먼저/문자열 나중으로 재배열하고 채널 이름의 앞뒤 공백을 지워버려서, 원래 컬럼 순서를 사이드카 JSON(`<파일명>.mf4.columns.json`)에 저장해뒀다가 공백을 무시하고 매칭해 복원하도록 처리(실제 79컬럼 데이터에서 공백 포함 채널명 3개 때문에 전체 순서 복원이 통째로 실패했던 걸 재현 후 수정)
+  - `app/main_window.py`: "MDF로 변환" 버튼 추가, 파일 열기 다이얼로그 필터에 `.mf4`/`.mdf` 포함
+  - `requirements.txt`에 `asammdf` 추가
+- 기능 변경: 파일 목록 복수 선택 지원, "결합하기"/"MDF로 변환"이 전체가 아닌 선택한 파일만 대상으로 동작
+  - `app/main_window.py`: `QListWidget.setSelectionMode(ExtendedSelection)` 추가. `_combine_and_display`/`_convert_selected_to_mdf`가 선택 항목이 없으면 안내 메시지만 띄우고 동작하지 않도록 변경(이전엔 선택 없으면 전체 대상으로 동작했음)
+- 기능 추가: 멀티 Y축 그래프 (사용자 제공 참고 이미지 기반)
+  - `app/plot_canvas.py`: `plot_lines()`가 체크된 Y축 컬럼마다 `twinx()`로 별도 축을 만들어 왼쪽/오른쪽으로 번갈아 바깥으로 배치(`_OUTWARD_STEP_PT`), 각 축의 라벨/눈금 색을 해당 선 색과 맞춤
+  - 실제로 겪은 버그 2개를 실측 재현 후 수정: (1) `handles, labels = ax.get_legend_handles_labels()`가 X축 라벨 배열을 담아둔 변수명 `labels`를 그대로 재사용해서, X축 눈금에 날짜/시간 대신 마지막으로 그린 컬럼 이름이 표시되던 클로저 버그(변수명을 `line_labels`로 분리해 수정) — 79컬럼 실데이터로 재현/검증, (2) `constrained_layout=True`가 여러 개의 바깥으로 밀어낸(outward-offset) 축의 자리를 안정적으로 계산하지 못해 축 라벨이 엉뚱한 위치(그래프 하단)에 겹쳐 그려지는 걸 실측으로 확인 — Figure 크기(인치) 기준으로 직접 여백을 계산하는 방식(`subplots_adjust`)으로 교체해 해결
+  - `_on_scroll`(마우스 휠 확대/축소)도 여러 축을 지원하도록 변경: 커서의 화면상 세로 위치를 각 축의 `transAxes` 비율로 변환해 모든 축에 동일 비율로 확대/축소 적용
+- 기능 추가: 그래프 범례(legend)를 마우스로 드래그해서 옮길 수 있도록 `legend.set_draggable(True)` 적용(데이터를 가릴 때 사용자가 직접 위치 조정 가능)
+- 배포 방식 조사 및 변경: PyInstaller 빌드를 `--onefile`에서 `--onedir`로 변경
+  - 원인 조사: (1) onefile은 실행할 때마다 압축 해제가 필요해 시작이 느림(실측 체감), (2) USB에서 onefile exe를 직접 실행하면 압축 해제 도중 파일 하나를 못 읽어 실행 자체가 실패하는 사례 실제 발생(`Failed to extract entry: ... failed to open archive file!`), (3) Windows 11 Smart App Control이 서명 안 된 exe를 자체 판단으로 막았다 안 막았다 하는 걸 이벤트 로그(`Microsoft-Windows-CodeIntegrity/Operational`, 이벤트 ID 3033/3077)로 반복 확인 — 같은 프로젝트를 4번 빌드했는데 3번은 통과, 1번은 차단됨. onedir로 바꾼 뒤에는(같은 PC, SAC 켠 상태에서도) 차단 없이 실행됨을 확인
+  - `CLAUDE.md`의 빌드 명령/설명을 onedir 기준으로 갱신, 배포 시 `dist/DataViewer/` 폴더 전체(exe + `_internal/`)를 옮겨야 한다는 점 명시
+
 ## 2026-07-22
 
 - 버그 수정: 대용량 CSV 5개(약 128만 행) 결합 후 그래프가 무한 로딩하는 문제 조사 및 수정

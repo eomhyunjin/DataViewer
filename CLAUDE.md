@@ -19,12 +19,14 @@ python -m venv .venv
 ./.venv/Scripts/python main.py
 ```
 
-Windows 단일 실행파일(exe) 빌드 (PyInstaller, onefile, 콘솔창 없음):
+Windows 배포용 빌드 (PyInstaller, onedir, 콘솔창 없음):
 ```bash
 ./.venv/Scripts/pip install pyinstaller
-./.venv/Scripts/pyinstaller --noconfirm --onefile --windowed --name DataViewer main.py
+./.venv/Scripts/pyinstaller --noconfirm --onedir --windowed --name DataViewer main.py
 ```
-결과물은 `dist/DataViewer.exe`에 생성됩니다. `build/`, `dist/`, `*.spec`은 `.gitignore`에 포함되어 있습니다 — exe는 로컬 빌드 산출물일 뿐 커밋 대상이 아닙니다.
+결과물은 `dist/DataViewer/`(exe + `_internal/`) 폴더에 생성됩니다. 배포할 때는 `DataViewer.exe`만 옮기면 안 되고 **이 폴더 전체**를 옮겨야 합니다 — 실행에 필요한 Python 런타임과 라이브러리(PySide6, pandas, asammdf 등)가 전부 `_internal/`에 들어있고 exe 자체는 그걸 불러오는 작은 런처일 뿐입니다. `build/`, `dist/`, `*.spec`은 `.gitignore`에 포함되어 있습니다 — 빌드 산출물은 커밋 대상이 아니고 GitHub Releases로만 배포합니다(zip으로 압축해서 첨부).
+
+`--onefile`(단일 exe) 대신 `--onedir`을 쓰는 이유는 실측으로 확인한 세 가지 문제 때문입니다: (1) onefile은 실행할 때마다 번들 전체(수백MB)를 임시 폴더에 압축 해제해야 해서 매번 시작이 느림, (2) USB 등 이동식 디스크에서 onefile exe를 직접 실행하면 압축 해제 도중 파일 하나를 못 읽어서("Failed to extract entry: ... failed to open archive file!") 실행 자체가 실패하는 경우가 실제로 있었음(로컬 디스크로 복사 후 실행하면 회피 가능하지만 onedir은 애초에 이 문제가 없음), (3) Windows 11의 Smart App Control이 서명 안 된 실행파일을 자체 클라우드 평판으로 막을지 말지 결정하는데, 매번 새로 빌드되는 261MB짜리 onefile exe는 반복적으로 차단당한 반면 onedir의 작은 런처 exe(15MB 안팎)는 차단되지 않는 걸 실측으로 확인함 — 다만 이건 클라우드 쪽 판단이라 항상 보장되는 동작은 아님.
 
 테스트 스위트와 린터는 아직 구성되어 있지 않습니다. 데이터 로직을 확인할 때 가장 유용한 방법은 `app/data_loader.py`의 `load_files`/`combine_frames`를 샘플 파일로 직접 실행해보는 것입니다 (`sample_data/`에 열 구조가 같은 `.xlsx` 샘플 2개가 있습니다).
 

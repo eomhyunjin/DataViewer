@@ -15,36 +15,64 @@ plt.rcParams["axes.unicode_minus"] = False
 # 점마다 마커를 찍으면 픽셀이 뭉개져 보이지도 않을뿐더러 렌더링 비용만 늘어난다.
 _MARKER_ROW_THRESHOLD = 500
 
+# 두 번째 이후 Y축(twinx)을 왼쪽/오른쪽으로 바깥으로 밀어낼 때 축 하나당 벌리는 간격(포인트).
+_OUTWARD_STEP_PT = 60
+
 
 class PlotCanvas(FigureCanvasQTAgg):
     def __init__(self):
-        self.figure = Figure(figsize=(5, 4), tight_layout=True)
+        self.figure = Figure(figsize=(5, 4))
         super().__init__(self.figure)
         self.ax = self.figure.add_subplot(111)
+        self._extra_axes: list = []  # 두 번째 이후 Y축(twinx)들. clear()/plot_lines()마다 새로 만든다.
         self.mpl_connect("scroll_event", self._on_scroll)
 
     def _on_scroll(self, event) -> None:
         """마우스 커서 위치를 중심으로 휠 확대/축소한다 (위로: 확대, 아래로: 축소).
 
         부분 확대(드래그 사각형)와 이동/원래대로는 NavigationToolbar2QT 버튼이 담당하고,
-        이건 그 사이의 빠른 확대/축소 조작을 보완한다.
+        이건 그 사이의 빠른 확대/축소 조작을 보완한다. Y축이 여러 개(twinx)면 서로 스케일이
+        달라 event.ydata를 그대로 쓸 수 없으므로, 커서의 화면상 세로 위치를 각 축의
+        transAxes 기준 비율(0~1)로 바꿔 모든 축에 동일한 비율로 확대/축소를 적용한다.
+        twinx 축들은 화면상 같은 위치를 공유하므로 이 비율은 축마다 동일하다.
         """
-        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+        axes = [self.ax, *self._extra_axes]
+        if event.inaxes not in axes or event.xdata is None:
             return
         zoom_factor = 0.85 if event.button == "up" else 1 / 0.85
+
         xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
-        x, y = event.xdata, event.ydata
+        x = event.xdata
         self.ax.set_xlim(x - (x - xlim[0]) * zoom_factor, x + (xlim[1] - x) * zoom_factor)
-        self.ax.set_ylim(y - (y - ylim[0]) * zoom_factor, y + (ylim[1] - y) * zoom_factor)
+
+        _, frac_y = event.inaxes.transAxes.inverted().transform((event.x, event.y))
+        for ax in axes:
+            ylim = ax.get_ylim()
+            y_at_frac = ylim[0] + frac_y * (ylim[1] - ylim[0])
+            new_height = (ylim[1] - ylim[0]) * zoom_factor
+            new_bottom = y_at_frac - frac_y * new_height
+            ax.set_ylim(new_bottom, new_bottom + new_height)
         self.draw_idle()
+
+    def _reset_axes(self) -> None:
+        """이전에 plot_lines()가 만든 twinx 축들을 모두 지우고 기본 축 하나만 남긴다."""
+        for ax in self._extra_axes:
+            ax.remove()
+        self._extra_axes = []
+        self.ax.clear()
 
     def plot_lines(self, data: pd.DataFrame, x_column: str, y_columns: list[str]) -> list[str]:
         """x_column 기준으로 y_columns를 선 그래프로 그린다.
 
+        y_columns 각각에 별도의 Y축(twinx)을 하나씩 만들어서(참고: `y축 그래프 샘플.png`) 단위/
+        범위가 서로 다른 신호를 한 그래프에서 동시에 봐도 한쪽이 눌려 보이지 않게 한다. 각 축의
+        라벨/눈금 색을 해당 선 색과 맞춰서 어떤 축이 어떤 선인지 한눈에 구분되게 한다. 축은
+        첫 번째 컬럼은 기본 축(왼쪽)에 그대로 두고, 이후 컬럼부터 오른쪽/왼쪽으로 번갈아 바깥으로
+        밀어내며 배치한다.
+
         숫자형이 아닌 y 컬럼은 건너뛰고, 건너뛴 컬럼명 목록을 반환한다.
         """
-        self.ax.clear()
+        self._reset_axes()
         skipped: list[str] = []
 
         x_raw = data[x_column]
@@ -63,25 +91,77 @@ class PlotCanvas(FigureCanvasQTAgg):
             )
 
         use_markers = len(data) <= _MARKER_ROW_THRESHOLD
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+        plotted = 0  # 건너뛴 컬럼은 축을 만들지 않으므로 y_columns의 인덱스가 아니라 별도로 센다.
+        left_extra = 0
+        right_extra = 0
+        all_handles = []
+        all_labels = []
         for y_column in y_columns:
             y_series = pd.to_numeric(data[y_column], errors="coerce")
             if y_series.notna().sum() == 0:
                 skipped.append(y_column)
                 continue
-            if use_markers:
-                self.ax.plot(x_values, y_series, marker="o", markersize=3, label=y_column)
-            else:
-                self.ax.plot(x_values, y_series, label=y_column)
 
-        if y_columns and len(y_columns) > len(skipped):
+            color = color_cycle[plotted % len(color_cycle)]
+            if plotted == 0:
+                ax = self.ax
+            else:
+                ax = self.ax.twinx()
+                self._extra_axes.append(ax)
+                ax.patch.set_visible(False)
+                if plotted % 2 == 1:
+                    right_extra += 1
+                    ax.spines["right"].set_position(("outward", _OUTWARD_STEP_PT * (right_extra - 1)))
+                else:
+                    left_extra += 1
+                    ax.yaxis.set_label_position("left")
+                    ax.yaxis.set_ticks_position("left")
+                    ax.spines["left"].set_visible(True)
+                    ax.spines["right"].set_visible(False)
+                    ax.spines["left"].set_position(("outward", _OUTWARD_STEP_PT * left_extra))
+
+            if use_markers:
+                (line,) = ax.plot(x_values, y_series, color=color, marker="o", markersize=3, label=y_column)
+            else:
+                (line,) = ax.plot(x_values, y_series, color=color, label=y_column)
+            ax.set_ylabel(y_column, color=color)
+            ax.tick_params(axis="y", colors=color)
+            handles, line_labels = ax.get_legend_handles_labels()
+            all_handles += handles
+            all_labels += line_labels
+            plotted += 1
+
+        if all_handles:
             # loc="best"는 겹침을 피하려고 모든 데이터 포인트와 위치를 비교하기 때문에
             # 데이터가 많으면 그 자체로 몇 초~수십 초가 걸린다. 고정 위치로 그 비용을 없앤다.
-            self.ax.legend(loc="upper right")
+            legend = self.ax.legend(all_handles, all_labels, loc="upper right")
+            # 범례가 그래프 데이터를 가릴 때 사용자가 마우스로 직접 끌어서 옮길 수 있게 한다.
+            legend.set_draggable(True)
         self.ax.set_xlabel(x_column)
         self.ax.tick_params(axis="x", rotation=45)
+
+        # constrained_layout/tight_layout는 twinx로 바깥에 쌓인(outward-offset) 축들의 자리를
+        # 안정적으로 계산하지 못해서(축이 여러 개일 때 라벨이 엉뚱한 자리로 튀는 현상을 실제로
+        # 확인함), 현재 Figure 크기(인치)를 기준으로 각 축이 필요로 하는 여백을 직접 계산한다.
+        # OUTWARD_STEP_PT만큼 바깥으로 밀어낸 축마다 그 간격(포인트->인치 변환) + 축 자체의
+        # 눈금/라벨 텍스트가 차지할 여백을 더한다.
+        fig_width_in, _ = self.figure.get_size_inches()
+        base_axis_in = 0.55  # 안쪽(호스트/기본 위치) 축 하나의 눈금+라벨 폭
+        outer_label_in = 0.5  # 가장 바깥 축의 눈금+라벨이 추가로 필요로 하는 폭
+        step_in = _OUTWARD_STEP_PT / 72
+
+        left_in = base_axis_in + (left_extra * step_in + outer_label_in if left_extra else 0)
+        right_in = base_axis_in + (right_extra * step_in + outer_label_in if right_extra else 0)
+        left_margin = left_in / fig_width_in
+        right_margin = 1 - right_in / fig_width_in
+        if right_margin <= left_margin:
+            right_margin = left_margin + 0.05
+        self.figure.subplots_adjust(left=left_margin, right=right_margin, bottom=0.22, top=0.92)
         self.draw()
         return skipped
 
     def clear(self) -> None:
-        self.ax.clear()
+        self._reset_axes()
         self.draw()

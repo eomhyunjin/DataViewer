@@ -25,7 +25,14 @@ from PySide6.QtWidgets import (
 
 from app import __version__
 from app import figure_options as _figure_options
-from app.data_loader import combine_frames, is_supported_file, load_files, numeric_columns
+from app.data_loader import (
+    MDF_SUFFIXES,
+    combine_frames,
+    convert_to_mdf,
+    is_supported_file,
+    load_files,
+    numeric_columns,
+)
 from app.plot_canvas import PlotCanvas
 from app.table_model import PandasTableModel
 
@@ -95,11 +102,17 @@ class MainWindow(QMainWindow):
 
         self._file_list = QListWidget()
         self._file_list.setObjectName("FileList")
+        self._file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         left_layout.addWidget(self._file_list)
 
         remove_button = QPushButton("선택 파일 제거")
         remove_button.clicked.connect(self._remove_selected_files)
         left_layout.addWidget(remove_button)
+
+        convert_button = QPushButton("MDF로 변환")
+        convert_button.setObjectName("SecondaryButton")
+        convert_button.clicked.connect(self._convert_selected_to_mdf)
+        left_layout.addWidget(convert_button)
 
         combine_button = QPushButton("결합하기")
         combine_button.setObjectName("PrimaryButton")
@@ -180,9 +193,9 @@ class MainWindow(QMainWindow):
     def _open_files_dialog(self) -> None:
         file_names, _ = QFileDialog.getOpenFileNames(
             self,
-            "CSV/Excel 파일 선택",
+            "CSV/Excel/MDF 파일 선택",
             "",
-            "데이터 파일 (*.csv *.xlsx *.xls)",
+            "데이터 파일 (*.csv *.xlsx *.xls *.mf4 *.mdf)",
         )
         self._add_files([Path(name) for name in file_names])
 
@@ -214,13 +227,55 @@ class MainWindow(QMainWindow):
             self._loaded_frames.pop(path_str, None)
             self._file_list.takeItem(self._file_list.row(item))
 
-    # --- 결합/표시 ---
-    def _combine_and_display(self) -> None:
-        if not self._loaded_frames:
-            QMessageBox.information(self, "결합", "먼저 파일을 추가해주세요.")
+    def _convert_selected_to_mdf(self) -> None:
+        """목록에서 선택한 CSV/Excel 파일을 같은 폴더에 MDF(.mf4)로 저장해둔다.
+
+        다음에 같은 데이터를 열 때는 원본 CSV/Excel 대신 여기서 만든 .mf4 파일을 "파일
+        열기"로 불러오면 된다. CSV는 pandas C 파서가 이미 빨라 캐싱 이득이 거의 없지만,
+        Excel(.xlsx)은 openpyxl의 셀 단위 XML 파싱이 병목이라 재로딩이 실측상 수십 배
+        빨라진다(자세한 내용은 dataviewer-mdf-investigation 메모리 참고).
+        """
+        items = self._file_list.selectedItems()
+        if not items:
+            QMessageBox.information(self, "MDF 변환", "변환할 파일을 목록에서 선택해주세요.")
             return
 
-        result = combine_frames(self._loaded_frames)
+        converted: list[Path] = []
+        skipped: list[str] = []
+        errors: dict[str, str] = {}
+
+        for item in items:
+            path_str = item.data(_FILE_PATH_ROLE)
+            path = Path(path_str)
+            if path.suffix.lower() in MDF_SUFFIXES:
+                skipped.append(path.name)
+                continue
+            try:
+                target = convert_to_mdf(path, self._loaded_frames[path_str])
+                converted.append(target)
+            except Exception as exc:  # noqa: BLE001 - 파일별 오류를 모아서 보여줘야 함
+                errors[path.name] = str(exc)
+
+        message_parts = []
+        if converted:
+            names = "\n".join(str(p) for p in converted)
+            message_parts.append(f"다음 파일로 변환되었습니다(다음에는 이 파일을 열면 더 빠릅니다):\n{names}")
+        if skipped:
+            message_parts.append(f"이미 MDF라 건너뜀: {', '.join(skipped)}")
+        if errors:
+            details = "\n".join(f"{k}: {v}" for k, v in errors.items())
+            message_parts.append(f"변환 실패:\n{details}")
+        QMessageBox.information(self, "MDF 변환", "\n\n".join(message_parts) if message_parts else "변환할 파일이 없습니다.")
+
+    # --- 결합/표시 ---
+    def _combine_and_display(self) -> None:
+        items = self._file_list.selectedItems()
+        if not items:
+            QMessageBox.information(self, "결합", "결합할 파일을 목록에서 선택해주세요.")
+            return
+
+        selected_frames = {item.data(_FILE_PATH_ROLE): self._loaded_frames[item.data(_FILE_PATH_ROLE)] for item in items}
+        result = combine_frames(selected_frames)
         self._table_model.set_dataframe(result.data)
 
         if result.mismatched_files:
