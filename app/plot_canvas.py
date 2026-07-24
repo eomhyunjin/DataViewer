@@ -25,6 +25,7 @@ class PlotCanvas(FigureCanvasQTAgg):
         super().__init__(self.figure)
         self.ax = self.figure.add_subplot(111)
         self._extra_axes: list = []  # 두 번째 이후 Y축(twinx)들. clear()/plot_lines()마다 새로 만든다.
+        self._legend = None  # 현재 범례. 다음 plot_lines() 호출 때 드래그 위치를 이어받기 위해 들고 있는다.
         self.mpl_connect("scroll_event", self._on_scroll)
 
     def _on_scroll(self, event) -> None:
@@ -55,11 +56,18 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.draw_idle()
 
     def _reset_axes(self) -> None:
-        """이전에 plot_lines()가 만든 twinx 축들을 모두 지우고 기본 축 하나만 남긴다."""
+        """이전에 plot_lines()가 만든 twinx 축들과 범례를 모두 지우고 기본 축 하나만 남긴다.
+
+        범례는 self.ax가 아니라 self.figure에 붙어 있어서(이유는 plot_lines() 참고)
+        self.ax.clear()로는 지워지지 않으므로 따로 제거해야 한다.
+        """
         for ax in self._extra_axes:
             ax.remove()
         self._extra_axes = []
         self.ax.clear()
+        if self._legend is not None:
+            self._legend.remove()
+            self._legend = None
 
     def plot_lines(self, data: pd.DataFrame, x_column: str, y_columns: list[str]) -> list[str]:
         """x_column 기준으로 y_columns를 선 그래프로 그린다.
@@ -72,6 +80,11 @@ class PlotCanvas(FigureCanvasQTAgg):
 
         숫자형이 아닌 y 컬럼은 건너뛰고, 건너뛴 컬럼명 목록을 반환한다.
         """
+        # 이전 범례가 있었다면(=드래그로 옮겨놨을 수 있음) 위치를 기억해뒀다가 새 범례에 그대로
+        # 적용한다. _reset_axes()가 매번 범례를 새로 만들기 때문에, 이걸 안 하면 항목을
+        # 추가/제거할 때마다 기본 위치("upper right")로 되돌아가 버린다.
+        prev_loc = self._legend._loc if self._legend is not None else None
+
         self._reset_axes()
         skipped: list[str] = []
 
@@ -136,9 +149,22 @@ class PlotCanvas(FigureCanvasQTAgg):
         if all_handles:
             # loc="best"는 겹침을 피하려고 모든 데이터 포인트와 위치를 비교하기 때문에
             # 데이터가 많으면 그 자체로 몇 초~수십 초가 걸린다. 고정 위치로 그 비용을 없앤다.
-            legend = self.ax.legend(all_handles, all_labels, loc="upper right")
+            #
+            # self.ax가 아니라 self.figure에 범례를 붙인다: axes에 붙이면 matplotlib은 클릭이
+            # 일어난 axes(event.inaxes)가 범례를 가진 axes와 같을 때만 드래그용 pick 이벤트를
+            # 전달하는데, twinx()로 만든 두 번째 이후 Y축은 self.ax와 완전히 겹친 채 위에 쌓이고
+            # zorder도 같아서 "나중에 추가된 축"이 topmost로 판정된다. 그 결과 Y축이 2개 이상이면
+            # event.inaxes가 항상 twin 축이 되어 self.ax에 붙은 범례는 pick 이벤트를 못 받아
+            # 드래그가 전혀 안 먹는다(축이 1개일 때만 우연히 동작). figure에 붙이면 이 axes 매칭
+            # 조건 자체가 없어서 축 개수와 상관없이 항상 드래그된다.
+            legend = self.figure.legend(all_handles, all_labels, loc="upper right")
             # 범례가 그래프 데이터를 가릴 때 사용자가 마우스로 직접 끌어서 옮길 수 있게 한다.
             legend.set_draggable(True)
+            if prev_loc is not None:
+                legend._loc = prev_loc
+            self._legend = legend
+        else:
+            self._legend = None
         self.ax.set_xlabel(x_column)
         self.ax.tick_params(axis="x", rotation=45)
 
