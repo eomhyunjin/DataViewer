@@ -1,7 +1,8 @@
 """애플리케이션 전체에 적용할 QSS 스타일시트.
 
-참고 컨셉: 어두운 네이비 사이드바 + 밝고 깔끔한 메인 영역 + 파란 계열 포인트 컬러
-(Asana류 모던 SaaS 대시보드 느낌).
+참고 컨셉: 밝고 깔끔한 사이드바/메인 영역 + 파란 계열 포인트 컬러
+(Asana류 모던 SaaS 대시보드 느낌). 사이드바는 원래 어두운 네이비였으나 사용자 요청으로
+전체를 밝은 톤으로 통일했다.
 """
 
 STYLESHEET = """
@@ -22,40 +23,42 @@ QSplitter::handle {
 
 /* --- 왼쪽 사이드바 --- */
 QWidget#Sidebar {
-    background-color: #1E2130;
+    background-color: #FFFFFF;
+    border: 1px solid #E4E6EA;
     border-radius: 10px;
 }
 
 QWidget#Sidebar QLabel {
-    color: #9CA3AF;
+    color: #6B6F76;
 }
 
 QLabel#SidebarTitle {
-    color: #FFFFFF;
+    color: #151B26;
     font-size: 12pt;
     font-weight: 600;
     padding: 2px 2px 6px 2px;
 }
 
 QWidget#Sidebar QPushButton {
-    background-color: #2A2D40;
-    color: #E4E6EB;
-    border: 1px solid #363A52;
+    background-color: #FFFFFF;
+    color: #151B26;
+    border: 1px solid #D8DBE0;
     border-radius: 6px;
     padding: 8px 12px;
     text-align: left;
 }
 QWidget#Sidebar QPushButton:hover {
-    background-color: #363A52;
+    background-color: #F1F4FA;
+    border-color: #4573D2;
 }
 QWidget#Sidebar QPushButton:pressed {
-    background-color: #40445E;
+    background-color: #E4E6EA;
 }
 
 QListWidget#FileList {
-    background-color: #262A3D;
-    color: #E4E6EB;
-    border: 1px solid #33374D;
+    background-color: #FFFFFF;
+    color: #151B26;
+    border: 1px solid #D8DBE0;
     border-radius: 8px;
     padding: 4px;
 }
@@ -63,14 +66,17 @@ QListWidget#FileList::item {
     padding: 6px 8px;
     border-radius: 4px;
 }
+QListWidget#FileList::item:hover {
+    background-color: #F1F4FA;
+}
 QListWidget#FileList::item:selected {
     background-color: #4573D2;
     color: #FFFFFF;
 }
 
 QLabel#DropHint {
-    color: #7B8094;
-    border: 1px dashed #40445E;
+    color: #9CA3AF;
+    border: 1px dashed #D8DBE0;
     border-radius: 8px;
     padding: 14px;
 }

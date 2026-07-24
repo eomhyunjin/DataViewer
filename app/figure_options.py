@@ -249,7 +249,12 @@ def axis_edit(axis, parent=None, on_apply=None):
     if isinstance(converter, DateConverter):
         lim = list(map(num2date, getattr(axes, f"get_{name}lim")()))
     else:
-        lim = list(map(float, getattr(axes, f"get_{name}lim")()))
+        # 소수점 그대로 두면 repr()이 부동소수점 오차까지 다 보여줘서(예: 16.264285714285716)
+        # 다이얼로그가 지저분해 보인다. 소수점 4자리로 반올림해서 Min/Max를 보여준다 —
+        # 그대로 OK를 눌러도 이 반올림된 값이 실제 축 범위로 적용된다(표시값과 실제값을 다르게
+        # 유지하는 방법은 matplotlib의 _formlayout.fedit()이 필드 서식을 커스터마이즈하는
+        # 훅을 제공하지 않아서 값 자체를 반올림하는 것 외에는 없다).
+        lim = [round(float(v), 4) for v in getattr(axes, f"get_{name}lim")()]
 
     datalist = [
         ('Min', lim[0]),
