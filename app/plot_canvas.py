@@ -7,6 +7,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
+from app import figure_options as _figure_options
+
 # Windows 기본 한글 폰트로 설정해 축/범례의 한글이 깨지지 않도록 한다.
 plt.rcParams["font.family"] = "Malgun Gothic"
 plt.rcParams["axes.unicode_minus"] = False
@@ -27,6 +29,28 @@ class PlotCanvas(FigureCanvasQTAgg):
         self._extra_axes: list = []  # 두 번째 이후 Y축(twinx)들. clear()/plot_lines()마다 새로 만든다.
         self._legend = None  # 현재 범례. 다음 plot_lines() 호출 때 드래그 위치를 이어받기 위해 들고 있는다.
         self.mpl_connect("scroll_event", self._on_scroll)
+        self.mpl_connect("button_press_event", self._on_axis_double_click)
+
+    def _on_axis_double_click(self, event) -> None:
+        """눈금/라벨 등 축 영역을 더블클릭하면 그 축의 Min/Max/Label을 바로 편집하는
+        작은 다이얼로그를 연다(`app.figure_options.axis_edit`). Customize(Figure options)
+        버튼은 axes 전체를 다루는 큰 다이얼로그라 축 범위만 빠르게 바꾸기엔 번거로워서,
+        축을 직접 더블클릭해서 편집할 수 있게 한 것.
+
+        Axis(XAxis/YAxis)는 matplotlib Artist의 pick 가능한 contains()를 구현하지 않으므로
+        (기본 구현은 항상 False), 대신 get_tightbbox()가 반환하는 디스플레이 좌표 bbox(눈금
+        라벨+축 라벨을 포함하는 영역)로 직접 히트 테스트한다. twinx()로 만든 축들은 X축을
+        공유하고 자기 xaxis는 숨기므로, X축 후보는 self.ax.xaxis 하나뿐이다.
+        """
+        if not event.dblclick or event.button != 1:
+            return
+        renderer = self.figure.canvas.get_renderer()
+        candidates = [self.ax.xaxis, self.ax.yaxis, *(ax.yaxis for ax in self._extra_axes)]
+        for axis in candidates:
+            bbox = axis.get_tightbbox(renderer)
+            if bbox is not None and bbox.contains(event.x, event.y):
+                _figure_options.axis_edit(axis, self, on_apply=self.refresh_legend)
+                return
 
     def _on_scroll(self, event) -> None:
         """마우스 커서 위치를 중심으로 휠 확대/축소한다 (위로: 확대, 아래로: 축소).
@@ -53,6 +77,51 @@ class PlotCanvas(FigureCanvasQTAgg):
             new_height = (ylim[1] - ylim[0]) * zoom_factor
             new_bottom = y_at_frac - frac_y * new_height
             ax.set_ylim(new_bottom, new_bottom + new_height)
+        self.draw_idle()
+
+    def _rebuild_legend(self, all_handles: list, all_labels: list, prev_loc=None) -> None:
+        """handles/labels로 범례를 (다시) 만든다. `self._legend`을 갱신해둔다.
+
+        loc="best"는 겹침을 피하려고 모든 데이터 포인트와 위치를 비교하기 때문에
+        데이터가 많으면 그 자체로 몇 초~수십 초가 걸린다. 고정 위치로 그 비용을 없앤다.
+
+        self.ax가 아니라 self.figure에 범례를 붙인다: axes에 붙이면 matplotlib은 클릭이
+        일어난 axes(event.inaxes)가 범례를 가진 axes와 같을 때만 드래그용 pick 이벤트를
+        전달하는데, twinx()로 만든 두 번째 이후 Y축은 self.ax와 완전히 겹친 채 위에 쌓이고
+        zorder도 같아서 "나중에 추가된 축"이 topmost로 판정된다. 그 결과 Y축이 2개 이상이면
+        event.inaxes가 항상 twin 축이 되어 self.ax에 붙은 범례는 pick 이벤트를 못 받아
+        드래그가 전혀 안 먹는다(축이 1개일 때만 우연히 동작). figure에 붙이면 이 axes 매칭
+        조건 자체가 없어서 축 개수와 상관없이 항상 드래그된다.
+        """
+        if self._legend is not None:
+            self._legend.remove()
+            self._legend = None
+        if not all_handles:
+            return
+        legend = self.figure.legend(all_handles, all_labels, loc="upper right")
+        # 범례가 그래프 데이터를 가릴 때 사용자가 마우스로 직접 끌어서 옮길 수 있게 한다.
+        legend.set_draggable(True)
+        if prev_loc is not None:
+            legend._loc = prev_loc
+        self._legend = legend
+
+    def refresh_legend(self) -> None:
+        """지금 그려진 라인들의 handle/label로 범례를 다시 그린다(드래그 위치는 유지).
+
+        matplotlib 범례는 handle을 그대로 참조하지 않고 생성 시점의 색/스타일로 복사본을
+        만들어 스스로 그리므로(HandlerLine2D), 이후 원본 라인의 색을 바꿔도 범례 아이콘은
+        자동으로 안 바뀐다. Customize(Figure options)에서 커브 색을 바꾼 뒤
+        `figure_options.figure_edit`의 `on_apply` 콜백으로 이 메서드를 호출해 범례를
+        최신 색으로 다시 그린다.
+        """
+        all_handles: list = []
+        all_labels: list = []
+        for ax in (self.ax, *self._extra_axes):
+            handles, labels = ax.get_legend_handles_labels()
+            all_handles += handles
+            all_labels += labels
+        prev_loc = self._legend._loc if self._legend is not None else None
+        self._rebuild_legend(all_handles, all_labels, prev_loc)
         self.draw_idle()
 
     def _reset_axes(self) -> None:
@@ -146,25 +215,7 @@ class PlotCanvas(FigureCanvasQTAgg):
             all_labels += line_labels
             plotted += 1
 
-        if all_handles:
-            # loc="best"는 겹침을 피하려고 모든 데이터 포인트와 위치를 비교하기 때문에
-            # 데이터가 많으면 그 자체로 몇 초~수십 초가 걸린다. 고정 위치로 그 비용을 없앤다.
-            #
-            # self.ax가 아니라 self.figure에 범례를 붙인다: axes에 붙이면 matplotlib은 클릭이
-            # 일어난 axes(event.inaxes)가 범례를 가진 axes와 같을 때만 드래그용 pick 이벤트를
-            # 전달하는데, twinx()로 만든 두 번째 이후 Y축은 self.ax와 완전히 겹친 채 위에 쌓이고
-            # zorder도 같아서 "나중에 추가된 축"이 topmost로 판정된다. 그 결과 Y축이 2개 이상이면
-            # event.inaxes가 항상 twin 축이 되어 self.ax에 붙은 범례는 pick 이벤트를 못 받아
-            # 드래그가 전혀 안 먹는다(축이 1개일 때만 우연히 동작). figure에 붙이면 이 axes 매칭
-            # 조건 자체가 없어서 축 개수와 상관없이 항상 드래그된다.
-            legend = self.figure.legend(all_handles, all_labels, loc="upper right")
-            # 범례가 그래프 데이터를 가릴 때 사용자가 마우스로 직접 끌어서 옮길 수 있게 한다.
-            legend.set_draggable(True)
-            if prev_loc is not None:
-                legend._loc = prev_loc
-            self._legend = legend
-        else:
-            self._legend = None
+        self._rebuild_legend(all_handles, all_labels, prev_loc)
         self.ax.set_xlabel(x_column)
         self.ax.tick_params(axis="x", rotation=45)
 

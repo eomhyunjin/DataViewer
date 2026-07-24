@@ -50,15 +50,16 @@ class _PlotToolbar(NavigationToolbar2QT):
     toolitems = [item for item in NavigationToolbar2QT.toolitems if item[0] not in ("Back", "Forward")]
 
     def edit_parameters(self) -> None:
-        """Customize 버튼 동작. matplotlib 기본 다이얼로그 대신 X/Y축 Scale
-        (linear/log/symlog/logit) 드롭다운만 뺀 `app.figure_options.figure_edit`을 쓴다
-        — 자세한 이유는 그 모듈의 docstring 참고. 이 앱은 항상 축이 하나뿐이라
-        matplotlib 원본에 있는 "여러 축 중 선택" 분기는 재현하지 않았다.
+        """Customize 버튼 동작. matplotlib 기본 다이얼로그 대신 Scale 드롭다운과 Axes 탭을
+        뺀 `app.figure_options.figure_edit`을 쓴다 — 자세한 이유는 그 모듈의 docstring
+        참고. 축 Min/Max/Label 편집은 그래프에서 해당 축을 더블클릭하면 뜨는 작은
+        다이얼로그(`PlotCanvas._on_axis_double_click`)가 대신한다. 커브 색을 바꾸면
+        범례/축 색도 같이 갱신되도록 `on_apply`로 `refresh_legend`를 넘긴다.
         """
         axes = self.canvas.figure.get_axes()
         if not axes:
             return
-        _figure_options.figure_edit(axes[0], self)
+        _figure_options.figure_edit(axes[0], self, on_apply=self.canvas.refresh_legend)
 
 
 class MainWindow(QMainWindow):

@@ -10,6 +10,13 @@
   - 덧붙여, `plot_lines()`가 매번 새 범례를 만들다 보니 컬럼 체크/해제로 그래프를 다시 그릴 때마다 드래그해둔 위치가 기본값(`upper right`)으로 초기화되던 것도 같이 수정 — 이전 범례의 `_loc`을 기억해뒀다가 새 범례에 그대로 적용
   - 사용자가 실제 프로그램에서 확인 완료
 
+- 기능 추가: 그래프의 X/Y축을 더블클릭하면 그 축의 Min/Max/Label만 편집하는 작은 다이얼로그(`axis_edit`)를 열도록 추가
+  - `app/figure_options.py`: `figure_edit()`에서 뗀 축 하나 분량 로직으로 `axis_edit()` 신설. Y축 편집 시 라벨을 바꾸면 그 축에 그려진 선의 범례 이름(label)도 함께 바꿔서 축 라벨과 범례 이름이 어긋나지 않게 함
+  - `app/plot_canvas.py`: `button_press_event`를 `_on_axis_double_click`에 연결. `Axis`(XAxis/YAxis)는 pick 가능한 `contains()`를 구현하지 않아서(기본 구현은 항상 False) `get_tightbbox()`가 반환하는 bbox로 직접 히트 테스트
+  - Customize(Figure options) 다이얼로그에서는 Title/축 Min·Max·Label/legend 재생성 체크박스를 담은 "Axes" 탭 전체를 제거(Curves 탭만 남음) — 축 편집은 위 더블클릭 다이얼로그로 옮겨감. 기존 Axes 탭은 항상 첫 번째 축만 편집 가능해 twinx로 만든 추가 Y축은 건드릴 수 없었음
+  - `app/plot_canvas.py`: Customize에서 커브 색을 바꾸면 그 축의 y라벨/눈금 색과 범례 아이콘 색도 같이 최신 색으로 갱신되도록 `refresh_legend()`/`on_apply` 콜백 추가(matplotlib 범례는 라인 색의 복사본을 그려서 원본 색이 바뀌어도 자동으로 안 따라감)
+  - 사용자가 실제 프로그램에서 Y축 라벨 변경 시 범례 이름도 같이 바뀌는 것을 확인 완료
+
 ## 2026-07-23
 
 - 기능 추가: CSV/Excel 파일을 MDF(.mf4)로 변환해서 캐시처럼 저장하는 기능
