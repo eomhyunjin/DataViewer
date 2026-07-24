@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.backend_bases import MouseButton, _Mode
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
@@ -30,6 +31,38 @@ class PlotCanvas(FigureCanvasQTAgg):
         self._legend = None  # 현재 범례. 다음 plot_lines() 호출 때 드래그 위치를 이어받기 위해 들고 있는다.
         self.mpl_connect("scroll_event", self._on_scroll)
         self.mpl_connect("button_press_event", self._on_axis_double_click)
+        self.mpl_connect("button_press_event", self._on_button_press)
+        self.mpl_connect("button_release_event", self._on_button_release)
+
+    def _on_button_press(self, event) -> None:
+        """그래프 위에서 왼쪽 버튼 드래그=이동, 오른쪽 버튼 드래그=확대/축소가 항상 되도록 한다.
+
+        matplotlib 기본 Pan 도구("Left button pans, Right button zooms")와 완전히 같은
+        동작이지만, 원래는 툴바에서 Pan 버튼을 눌러 모드를 켜야만 동작한다. 이 앱은 그
+        버튼을 없애고 이 동작을 기본값으로 켜뒀다 — `NavigationToolbar2.press_pan`/
+        `drag_pan`/`release_pan`을 그대로 재사용하는데, 이 메서드들은 `self.mode`(Pan
+        모드 on/off 상태)를 참조하지 않고 그 자체로 동작하며, twinx로 만든 여러 Y축까지
+        `Axes.start_pan`/`drag_pan`을 통해 자동으로 함께 다뤄준다.
+
+        "Zoom"(사각형으로 확대) 버튼이 켜져 있으면(`toolbar.mode == _Mode.ZOOM`) 그 동작과
+        겹치지 않도록 건너뛴다. 범례는 `self.figure`에 붙어 있어(축과 무관하게 항상 그
+        위에 겹쳐 보임) 범례를 클릭해서 드래그로 옮기는 동작과 겹치지 않도록, 클릭 지점이
+        범례 영역이면 이동/확대를 시작하지 않는다.
+        """
+        if event.button not in (MouseButton.LEFT, MouseButton.RIGHT) or event.dblclick:
+            return
+        toolbar = self.toolbar
+        if toolbar is None or toolbar.mode != _Mode.NONE:
+            return
+        if self._legend is not None and self._legend.get_window_extent().contains(event.x, event.y):
+            return
+        toolbar.press_pan(event)
+
+    def _on_button_release(self, event) -> None:
+        """`_on_button_press`가 시작한 이동/확대 드래그를 마무리한다."""
+        toolbar = self.toolbar
+        if toolbar is not None and toolbar._pan_info is not None:
+            toolbar.release_pan(event)
 
     def _on_axis_double_click(self, event) -> None:
         """눈금/라벨 등 축 영역을 더블클릭하면 그 축의 Min/Max/Label을 바로 편집하는

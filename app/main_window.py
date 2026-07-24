@@ -40,14 +40,20 @@ _FILE_PATH_ROLE = Qt.UserRole
 
 
 class _PlotToolbar(NavigationToolbar2QT):
-    """이전/다음 보기(Back/Forward) 버튼을 뺀 도구모음.
+    """이전/다음 보기(Back/Forward), Pan 버튼을 뺀 도구모음.
 
     `_update_plot`이 다시 그릴 때마다 `self._plot_toolbar.update()`로 뷰 기록을 통째로
     지우기 때문에(원래대로 버튼이 항상 최신 전체 보기로 돌아가게 하려고 그렇게 함)
     이전/다음 보기로 되돌아갈 기록이 애초에 남지 않아 실사용상 의미가 없어서 뺐다.
+
+    Pan 버튼("Left button pans, Right button zooms")은 버튼을 먼저 눌러 모드를 켜야만
+    동작해서 한 번 더 클릭해야 하는 게 번거롭다는 사용자 요청에 따라 뺐다. 그 대신
+    같은 동작(왼쪽 버튼 드래그=이동, 오른쪽 버튼 드래그=확대·축소)을 그래프 위에서 바로
+    쓸 수 있도록 `PlotCanvas`가 항상 켜놓는다(자세한 구현은 `PlotCanvas._on_button_press`
+    참고).
     """
 
-    toolitems = [item for item in NavigationToolbar2QT.toolitems if item[0] not in ("Back", "Forward")]
+    toolitems = [item for item in NavigationToolbar2QT.toolitems if item[0] not in ("Back", "Forward", "Pan")]
 
     def edit_parameters(self) -> None:
         """Customize 버튼 동작. matplotlib 기본 다이얼로그 대신 Scale 드롭다운과 Axes 탭을
@@ -96,7 +102,7 @@ class MainWindow(QMainWindow):
         open_button.clicked.connect(self._open_files_dialog)
         left_layout.addWidget(open_button)
 
-        drop_hint = QLabel("여기에 CSV/Excel 파일을\n드래그 앤 드롭하세요")
+        drop_hint = QLabel("여기에 CSV/Excel/MDF 파일을\n드래그 앤 드롭하세요")
         drop_hint.setObjectName("DropHint")
         drop_hint.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(drop_hint)

@@ -17,6 +17,14 @@
   - `app/plot_canvas.py`: Customize에서 커브 색을 바꾸면 그 축의 y라벨/눈금 색과 범례 아이콘 색도 같이 최신 색으로 갱신되도록 `refresh_legend()`/`on_apply` 콜백 추가(matplotlib 범례는 라인 색의 복사본을 그려서 원본 색이 바뀌어도 자동으로 안 따라감)
   - 사용자가 실제 프로그램에서 Y축 라벨 변경 시 범례 이름도 같이 바뀌는 것을 확인 완료
 
+- 기능 변경: 툴바 Pan 버튼("Left button pans, Right button zooms")을 없애고, 그 동작을 그래프 위 클릭+드래그에 항상 기본으로 적용
+  - `app/main_window.py`: `_PlotToolbar.toolitems`에서 `"Pan"` 제거
+  - `app/plot_canvas.py`: `_on_button_press`/`_on_button_release` 추가. matplotlib이 Pan 모드에서 쓰는 `toolbar.press_pan`/`drag_pan`/`release_pan`을 그대로 재사용해서(twinx로 만든 여러 Y축까지 자동으로 같이 처리됨) 왼쪽 드래그=이동, 오른쪽 드래그=확대·축소가 버튼 없이 기본 동작이 되도록 함
+  - 범례를 클릭해서 드래그로 옮기는 기존 동작과 겹치지 않도록 클릭 지점이 범례 영역이면 건너뛰고, "Zoom"(사각형 확대) 버튼이 켜져 있을 때도 겹치지 않도록 건너뜀
+  - 가상 마우스 이벤트로 왼쪽 드래그(이동)/오른쪽 드래그(확대, 멀티 Y축 포함)/범례 드래그 미간섭/Zoom 모드와의 미충돌을 확인
+- 조사: 사용자가 "드래그앤드롭이 안 된다"고 보고해서 코드(`dragEnterEvent`/`dragMoveEvent`/`dropEvent`, `data_loader.SUPPORTED_SUFFIXES`)를 확인했으나 이상 없었음(MDF도 이미 지원 대상에 포함되어 있었음). 실제 원인은 코드가 아니라 **이 세션(터미널)이 관리자 권한으로 실행 중이어서** Windows UIPI가 일반 권한 탐색기 → 관리자 권한 앱 창으로의 드래그앤드롭을 차단한 것이었음(커서만 움직이고 드롭해도 무반응인 게 특징) — 일반 권한 터미널에서 실행하니 정상 동작 확인. 코드 변경 없음
+  - 드롭 안내 문구만 "CSV/Excel 파일을" → "CSV/Excel/MDF 파일을"로 갱신
+
 ## 2026-07-23
 
 - 기능 추가: CSV/Excel 파일을 MDF(.mf4)로 변환해서 캐시처럼 저장하는 기능
