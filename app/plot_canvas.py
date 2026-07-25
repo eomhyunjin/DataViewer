@@ -1,7 +1,10 @@
 """matplotlib 선 그래프를 Qt 위젯에 임베드."""
 from __future__ import annotations
 
+from typing import Callable
+
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.backend_bases import MouseButton, _Mode
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -29,8 +32,13 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.ax = self.figure.add_subplot(111)
         self._extra_axes: list = []  # 두 번째 이후 Y축(twinx)들. clear()/plot_lines()마다 새로 만든다.
         self._legend = None  # 현재 범례. 다음 plot_lines() 호출 때 드래그 위치를 이어받기 위해 들고 있는다.
+        self._reference_line = None  # plot_lines()가 그린 첫 번째 선. 더블클릭한 x위치에서 가장 가까운 행을 찾는 기준.
+        # 그래프의 점을 더블클릭했을 때 호출된다(인자: 데이터프레임 내 행 위치). MainWindow가 연결해
+        # 테이블에서 해당 행을 선택/스크롤하는 데 쓴다.
+        self.on_point_double_click: Callable[[int], None] | None = None
         self.mpl_connect("scroll_event", self._on_scroll)
         self.mpl_connect("button_press_event", self._on_axis_double_click)
+        self.mpl_connect("button_press_event", self._on_point_double_click)
         self.mpl_connect("button_press_event", self._on_button_press)
         self.mpl_connect("button_release_event", self._on_button_release)
 
@@ -84,6 +92,31 @@ class PlotCanvas(FigureCanvasQTAgg):
             if bbox is not None and bbox.contains(event.x, event.y):
                 _figure_options.axis_edit(axis, self, on_apply=self.refresh_legend)
                 return
+
+    def _on_point_double_click(self, event) -> None:
+        """그래프 위 지점을 더블클릭하면 그 x위치에 가장 가까운 행을 `on_point_double_click`으로 알린다.
+
+        가장 가까운 "행"은 x값만으로 찾는다(더블클릭한 지점과 x가 가장 가까운 데이터 포인트).
+        y_columns는 모두 같은 x_column을 공유하고 plot_lines()에서 어떤 값도 행 단위로 걸러내지
+        않으므로(숫자 변환 실패는 NaN으로만 남김), 어떤 선을 기준으로 삼아도 같은 위치(인덱스)가
+        데이터프레임의 같은 행을 가리킨다 — 그래서 첫 번째로 그려진 선(`_reference_line`) 하나만
+        있으면 된다.
+
+        `line.get_xdata(orig=False)`로 matplotlib이 그릴 때 실제 사용한(단위 변환을 이미 거친)
+        x좌표를 그대로 재사용한다. X축이 날짜/문자열이라 원본 x값을 직접 변환해야 했다면
+        matplotlib 내부 변환과 어긋날 위험이 있는데, 이미 변환된 값을 재사용하면 그 위험이 없다.
+        """
+        if not event.dblclick or event.button != 1:
+            return
+        if event.inaxes not in (self.ax, *self._extra_axes):
+            return
+        if self._legend is not None and self._legend.get_window_extent().contains(event.x, event.y):
+            return
+        if self._reference_line is None or event.xdata is None or self.on_point_double_click is None:
+            return
+        x_converted = np.asarray(self._reference_line.get_xdata(orig=False), dtype=float)
+        row = int(np.nanargmin(np.abs(x_converted - event.xdata)))
+        self.on_point_double_click(row)
 
     def _on_scroll(self, event) -> None:
         """마우스 커서 위치를 중심으로 휠 확대/축소한다 (위로: 확대, 아래로: 축소).
@@ -170,6 +203,7 @@ class PlotCanvas(FigureCanvasQTAgg):
         if self._legend is not None:
             self._legend.remove()
             self._legend = None
+        self._reference_line = None
 
     def plot_lines(self, data: pd.DataFrame, x_column: str, y_columns: list[str]) -> list[str]:
         """x_column 기준으로 y_columns를 선 그래프로 그린다.
@@ -241,6 +275,8 @@ class PlotCanvas(FigureCanvasQTAgg):
                 (line,) = ax.plot(x_values, y_series, color=color, marker="o", markersize=3, label=y_column)
             else:
                 (line,) = ax.plot(x_values, y_series, color=color, label=y_column)
+            if plotted == 0:
+                self._reference_line = line
             ax.set_ylabel(y_column, color=color)
             ax.tick_params(axis="y", colors=color)
             handles, line_labels = ax.get_legend_handles_labels()

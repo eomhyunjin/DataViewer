@@ -165,6 +165,8 @@ class MainWindow(QMainWindow):
         plot_card_layout = QVBoxLayout(plot_card)
         plot_card_layout.setContentsMargins(8, 8, 8, 8)
         self._plot_canvas = PlotCanvas()
+        # 그래프의 점을 더블클릭하면 테이블에서 해당 행으로 이동하도록 연결한다.
+        self._plot_canvas.on_point_double_click = self._on_plot_point_double_click
         # 부분 확대(드래그로 사각형 선택), 이동, 원래대로 등 표준 그래프 탐색 도구.
         # 마우스 휠 확대/축소는 PlotCanvas._on_scroll이 별도로 처리한다.
         self._plot_toolbar = _PlotToolbar(self._plot_canvas, self)
@@ -333,6 +335,13 @@ class MainWindow(QMainWindow):
         self._update_plot()
 
     # --- 그래프 ---
+    def _on_plot_point_double_click(self, row: int) -> None:
+        """그래프에서 더블클릭한 지점과 가장 가까운 행을 테이블에서 선택하고 보이는 위치로 스크롤한다."""
+        if not 0 <= row < self._table_model.rowCount():
+            return
+        self._table_view.selectRow(row)
+        self._table_view.scrollTo(self._table_model.index(row, 0), QAbstractItemView.PositionAtCenter)
+
     def _update_plot(self) -> None:
         data = self._table_model.dataframe()
         if data.empty:
