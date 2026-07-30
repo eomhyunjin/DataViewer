@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -68,6 +68,34 @@ class _PlotToolbar(NavigationToolbar2QT):
         _figure_options.figure_edit(axes[0], self, on_apply=self.canvas.refresh_legend)
 
 
+class _FileListWidget(QListWidget):
+    """드래그로 항목 순서를 바꿀 수 있는 파일 목록. 순서가 바뀌면 `order_changed`를 emit한다.
+
+    QListWidget은 `moveRows()`를 구현하지 않아 내부 드래그 이동이 항상 model의
+    rowsMoved로 이어진다는 보장이 없다(Qt 버전에 따라 remove+insert로 처리될 수 있음).
+    그래서 신호 종류에 의존하지 않고 dropEvent 자체를 가로채 드롭이 끝난 뒤 한 번만
+    emit한다.
+    """
+
+    order_changed = Signal()
+    empty_area_double_clicked = Signal()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        super().dropEvent(event)
+        self.order_changed.emit()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        """항목이 없는 빈 여백을 더블클릭하면 `empty_area_double_clicked`를 emit한다.
+
+        구간 표시를 해제하는 용도(빈 곳을 더블클릭 = 표시 해제)로 쓴다. 항목 위를
+        더블클릭했을 때는 그대로 기본 동작(itemDoubleClicked 등)을 타도록 넘긴다.
+        """
+        if self.itemAt(event.pos()) is None:
+            self.empty_area_double_clicked.emit()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -79,6 +107,17 @@ class MainWindow(QMainWindow):
         self._table_model = PandasTableModel()
         self._y_checked: dict[str, bool] = {}
         self._numeric_columns: set[str] = set()
+        # 마지막으로 "결합하기"를 눌렀을 때 결합했던 파일 경로들(목록 순서대로).
+        # 드래그로 순서를 바꾸면 그 순간 화면 선택은 끌던 항목만 남기 때문에,
+        # 순서 변경 시 재결합할 대상은 실시간 selectedItems()가 아니라 이 목록을 써야 한다.
+        self._combined_paths: list[str] = []
+        # 결합된 테이블에서 각 파일이 차지하는 [시작, 끝) 행 구간. 파일을 더블클릭했을 때
+        # 그래프에서 어느 구간을 칠할지 찾는 데 쓴다. 열 구조가 달라 결합에서 제외된
+        # 파일은 여기 들어가지 않는다.
+        self._file_row_ranges: dict[str, tuple[int, int]] = {}
+        # 현재 그래프에 구간 표시 중인 파일. 그래프가 다시 그려져도(Y축 체크 변경 등)
+        # 표시가 계속 유지되도록 _update_plot()에서 이 값을 참고해 다시 칠한다.
+        self._highlighted_path: str | None = None
 
         self._build_ui()
 
@@ -107,9 +146,16 @@ class MainWindow(QMainWindow):
         drop_hint.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(drop_hint)
 
-        self._file_list = QListWidget()
+        self._file_list = _FileListWidget()
         self._file_list.setObjectName("FileList")
         self._file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self._file_list.setDragDropMode(QAbstractItemView.InternalMove)
+        # 더블클릭은 그래프 구간 표시 용도로 쓴다. 기본 편집 트리거를 꺼두지 않으면
+        # Qt가 더블클릭을 "이름 바꾸기" 시작으로도 처리해서 인라인 편집 상자가 함께 뜬다.
+        self._file_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._file_list.order_changed.connect(self._on_file_order_changed)
+        self._file_list.itemDoubleClicked.connect(self._on_file_item_double_clicked)
+        self._file_list.empty_area_double_clicked.connect(self._on_file_list_empty_double_clicked)
         left_layout.addWidget(self._file_list)
 
         remove_button = QPushButton("선택 파일 제거")
@@ -170,6 +216,7 @@ class MainWindow(QMainWindow):
         # 부분 확대(드래그로 사각형 선택), 이동, 원래대로 등 표준 그래프 탐색 도구.
         # 마우스 휠 확대/축소는 PlotCanvas._on_scroll이 별도로 처리한다.
         self._plot_toolbar = _PlotToolbar(self._plot_canvas, self)
+        self._plot_toolbar.setObjectName("PlotToolbar")
         plot_card_layout.addWidget(self._plot_toolbar)
         plot_card_layout.addWidget(self._plot_canvas)
         right_layout.addWidget(plot_card, stretch=1)
@@ -234,7 +281,63 @@ class MainWindow(QMainWindow):
         for item in self._file_list.selectedItems():
             path_str = item.data(_FILE_PATH_ROLE)
             self._loaded_frames.pop(path_str, None)
+            if path_str in self._combined_paths:
+                self._combined_paths.remove(path_str)
             self._file_list.takeItem(self._file_list.row(item))
+
+    def _select_paths(self, paths: set[str]) -> None:
+        """전달된 경로에 해당하는 항목들만 목록에서 선택 상태로 만든다."""
+        for i in range(self._file_list.count()):
+            item = self._file_list.item(i)
+            item.setSelected(item.data(_FILE_PATH_ROLE) in paths)
+
+    def _on_file_item_double_clicked(self, item: QListWidgetItem) -> None:
+        """파일 목록에서 파일을 더블클릭하면, 그 파일이 결합된 데이터에서 차지하는 구간을 그래프에 배경색으로 표시한다."""
+        path = item.data(_FILE_PATH_ROLE)
+        row_range = self._file_row_ranges.get(path)
+        if row_range is None:
+            QMessageBox.information(
+                self,
+                "그래프 구간 표시",
+                "이 파일은 현재 결합된 데이터에 포함되어 있지 않습니다. 먼저 결합해주세요.",
+            )
+            return
+        self._highlighted_path = path
+        self._plot_canvas.highlight_row_range(*row_range)
+
+    def _on_file_list_empty_double_clicked(self) -> None:
+        """파일 목록의 빈 여백을 더블클릭하면 표시 중이던 그래프 구간 강조를 해제한다."""
+        if self._highlighted_path is None:
+            return
+        self._highlighted_path = None
+        self._plot_canvas.clear_highlight()
+
+    def _on_file_order_changed(self) -> None:
+        """드래그로 파일 순서를 바꾸면, 이미 결합해서 보여주고 있던 데이터/그래프도 새 순서로 다시 그린다.
+
+        드래그는 "끄는 항목"만 선택 상태로 남기기 때문에(여러 개를 선택해 결합해둔 뒤 그중
+        하나만 끌면 나머지 선택은 풀림), 드롭 직후의 `selectedItems()`를 기준으로 재결합하면
+        원래 결합해서 보여주던 파일 중 일부가 빠진 채로 다시 그려진다. 그래서 마지막으로
+        "결합하기"를 눌렀을 때의 파일 집합(`self._combined_paths`)을 따로 기억해두고, 목록의
+        새 순서를 그대로 반영해 그 집합으로 재결합한다. 아직 한 번도 결합하지 않았으면 조용히
+        아무 것도 하지 않는다.
+        """
+        if not self._combined_paths:
+            return
+
+        combined_set = set(self._combined_paths)
+        ordered_paths = [
+            self._file_list.item(i).data(_FILE_PATH_ROLE)
+            for i in range(self._file_list.count())
+            if self._file_list.item(i).data(_FILE_PATH_ROLE) in combined_set
+        ]
+        if not ordered_paths:
+            return
+
+        self._combined_paths = ordered_paths
+        self._apply_combine(ordered_paths, reset_selection=False)
+        # 재결합 대상이 무엇인지 계속 눈에 보이도록, 드래그로 흐트러진 선택을 다시 맞춰준다.
+        self._select_paths(combined_set)
 
     def _convert_selected_to_mdf(self) -> None:
         """목록에서 선택한 CSV/Excel 파일을 같은 폴더에 MDF(.mf4)로 저장해둔다.
@@ -282,8 +385,21 @@ class MainWindow(QMainWindow):
         if not items:
             QMessageBox.information(self, "결합", "결합할 파일을 목록에서 선택해주세요.")
             return
+        paths = [item.data(_FILE_PATH_ROLE) for item in items]
+        self._combined_paths = paths
+        self._apply_combine(paths, reset_selection=True)
 
-        selected_frames = {item.data(_FILE_PATH_ROLE): self._loaded_frames[item.data(_FILE_PATH_ROLE)] for item in items}
+    def _apply_combine(self, paths: list[str], *, reset_selection: bool) -> None:
+        """전달된 파일 경로들을 그 순서대로 결합해서 테이블에 반영하고, 필요하면 그래프도 다시 그린다.
+
+        `reset_selection=False`(드래그로 순서만 바꾼 경우)인데 결합 후 열 구성이 이전과
+        똑같으면 X/Y 선택과 체크 상태를 그대로 유지한 채 새 순서의 데이터로 그래프까지
+        다시 그린다. 열 구성이 달라졌으면(파일 선택 자체가 바뀐 경우 등) 새로 고른 것과
+        똑같이 취급해 X/Y 선택을 초기화한다.
+        """
+        previous_columns = [self._x_combo.itemText(i) for i in range(self._x_combo.count())]
+
+        selected_frames = {path: self._loaded_frames[path] for path in paths}
         result = combine_frames(selected_frames)
         self._table_model.set_dataframe(result.data)
 
@@ -295,18 +411,40 @@ class MainWindow(QMainWindow):
                 f"다음 파일은 열 구조가 달라 결합에서 제외되었습니다:\n{names}",
             )
 
+        # combine_frames()가 mismatched_files를 뺀 나머지를 paths 순서 그대로 이어붙이므로,
+        # 같은 순서로 각 파일의 길이를 누적하면 결합된 테이블에서 그 파일이 차지하는
+        # [시작, 끝) 행 구간을 알 수 있다.
+        mismatched = set(result.mismatched_files)
+        row_ranges: dict[str, tuple[int, int]] = {}
+        cursor = 0
+        for path in paths:
+            if path in mismatched:
+                continue
+            length = len(self._loaded_frames[path])
+            row_ranges[path] = (cursor, cursor + length)
+            cursor += length
+        self._file_row_ranges = row_ranges
+        if self._highlighted_path not in row_ranges:
+            self._highlighted_path = None
+
         columns = list(result.data.columns)
         self._numeric_columns = set(numeric_columns(result.data))
-        self._y_checked = {c: False for c in columns}  # 사용자가 체크하기 전까진 그래프를 그리지 않음
 
-        self._x_combo.blockSignals(True)
-        self._x_combo.clear()
-        self._x_combo.addItems(columns)
-        self._x_combo.blockSignals(False)
+        if reset_selection or columns != previous_columns:
+            self._y_checked = {c: False for c in columns}  # 사용자가 체크하기 전까진 그래프를 그리지 않음
 
-        self._refresh_y_list()
-        self._plot_canvas.clear()  # 이전 결합 결과로 그려져 있던 그래프가 남아있지 않도록 비운다
-        self._plot_toolbar.update()  # 이전 데이터의 확대/축소 기록(원래대로 버튼 포함)도 함께 비운다
+            self._x_combo.blockSignals(True)
+            self._x_combo.clear()
+            self._x_combo.addItems(columns)
+            self._x_combo.blockSignals(False)
+
+            self._refresh_y_list()
+            self._plot_canvas.clear()  # 이전 결합 결과로 그려져 있던 그래프가 남아있지 않도록 비운다
+            self._plot_toolbar.update()  # 이전 데이터의 확대/축소 기록(원래대로 버튼 포함)도 함께 비운다
+        else:
+            # 열 구성은 그대로이고 행 순서만 바뀐 경우: X/Y 선택을 유지한 채 새 순서로 다시 그린다.
+            self._refresh_y_list()
+            self._update_plot()
 
     # --- X/Y축 선택 ---
     def _on_x_changed(self, _text: str) -> None:
@@ -360,6 +498,16 @@ class MainWindow(QMainWindow):
             return
 
         skipped = self._plot_canvas.plot_lines(data, x_column, y_columns)
+
+        # plot_lines()는 매번 축을 새로 그리며 이전 구간 표시를 지우므로, 더블클릭으로
+        # 표시해둔 파일이 있으면(Y축 체크 변경 등으로 다시 그려진 뒤에도) 같은 구간을 다시 칠한다.
+        if self._highlighted_path is not None:
+            row_range = self._file_row_ranges.get(self._highlighted_path)
+            if row_range is not None:
+                self._plot_canvas.highlight_row_range(*row_range)
+            else:
+                self._highlighted_path = None
+
         # matplotlib 툴바는 "원래대로" 버튼이 되돌아갈 기준(홈 뷰)을, 사용자가 처음으로 이동/부분
         # 확대를 시작하는 순간에야 자동으로 기록한다(matplotlib.backend_bases의
         # NavigationToolbar2._zoom_pan_handler 참고). 우리는 그 전에 마우스 휠로도 확대/축소가

@@ -24,15 +24,27 @@ _MARKER_ROW_THRESHOLD = 500
 # 두 번째 이후 Y축(twinx)을 왼쪽/오른쪽으로 바깥으로 밀어낼 때 축 하나당 벌리는 간격(포인트).
 _OUTWARD_STEP_PT = 60
 
+# DAQsystem(INCA/CANalyzer 스타일) 그래프와 톤을 맞추기 위한 커브 색상 팔레트.
+# DAQsystem의 ui/main_window.py CURVE_PALETTE와 동일한 값을 그대로 사용한다.
+_CURVE_PALETTE = ["#2563eb", "#d97706", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f"]
+
+# 그리드 선 색/굵기도 DAQsystem의 pyqtgraph showGrid(alpha=0.3)와 비슷한 옅은 톤으로 맞춘다.
+_GRID_COLOR = "#94a3b8"
+_GRID_ALPHA = 0.3
+
 
 class PlotCanvas(FigureCanvasQTAgg):
     def __init__(self):
         self.figure = Figure(figsize=(5, 4))
         super().__init__(self.figure)
+        # DAQsystem(pyqtgraph, background="w")과 톤을 맞추기 위해 배경을 명시적으로 흰색으로 고정한다.
+        self.figure.set_facecolor("white")
         self.ax = self.figure.add_subplot(111)
+        self.ax.set_facecolor("white")
         self._extra_axes: list = []  # 두 번째 이후 Y축(twinx)들. clear()/plot_lines()마다 새로 만든다.
         self._legend = None  # 현재 범례. 다음 plot_lines() 호출 때 드래그 위치를 이어받기 위해 들고 있는다.
         self._reference_line = None  # plot_lines()가 그린 첫 번째 선. 더블클릭한 x위치에서 가장 가까운 행을 찾는 기준.
+        self._highlight_span = None  # highlight_row_range()가 그린 구간 배경. 다시 그릴 때마다 하나만 유지한다.
         # 그래프의 점을 더블클릭했을 때 호출된다(인자: 데이터프레임 내 행 위치). MainWindow가 연결해
         # 테이블에서 해당 행을 선택/스크롤하는 데 쓴다.
         self.on_point_double_click: Callable[[int], None] | None = None
@@ -167,6 +179,11 @@ class PlotCanvas(FigureCanvasQTAgg):
         legend = self.figure.legend(all_handles, all_labels, loc="upper right")
         # 범례가 그래프 데이터를 가릴 때 사용자가 마우스로 직접 끌어서 옮길 수 있게 한다.
         legend.set_draggable(True)
+        # DAQsystem(pyqtgraph addLegend())의 흰 배경+옅은 테두리 범례 상자와 톤을 맞춘다.
+        frame = legend.get_frame()
+        frame.set_facecolor("white")
+        frame.set_edgecolor(_GRID_COLOR)
+        frame.set_alpha(0.95)
         if prev_loc is not None:
             legend._loc = prev_loc
         self._legend = legend
@@ -199,11 +216,12 @@ class PlotCanvas(FigureCanvasQTAgg):
         for ax in self._extra_axes:
             ax.remove()
         self._extra_axes = []
-        self.ax.clear()
+        self.ax.clear()  # ax.clear()가 highlight_row_range()로 그려둔 axvspan도 함께 지운다.
         if self._legend is not None:
             self._legend.remove()
             self._legend = None
         self._reference_line = None
+        self._highlight_span = None
 
     def plot_lines(self, data: pd.DataFrame, x_column: str, y_columns: list[str]) -> list[str]:
         """x_column 기준으로 y_columns를 선 그래프로 그린다.
@@ -240,7 +258,7 @@ class PlotCanvas(FigureCanvasQTAgg):
             )
 
         use_markers = len(data) <= _MARKER_ROW_THRESHOLD
-        color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        color_cycle = _CURVE_PALETTE
 
         plotted = 0  # 건너뛴 컬럼은 축을 만들지 않으므로 y_columns의 인덱스가 아니라 별도로 센다.
         left_extra = 0
@@ -287,6 +305,10 @@ class PlotCanvas(FigureCanvasQTAgg):
         self._rebuild_legend(all_handles, all_labels, prev_loc)
         self.ax.set_xlabel(x_column)
         self.ax.tick_params(axis="x", rotation=45)
+        # DAQsystem 그래프(pyqtgraph showGrid(alpha=0.3))와 같은 옅은 격자 톤.
+        # zorder=0으로 항상 데이터 선 아래에 깔리도록 고정한다.
+        self.ax.grid(True, color=_GRID_COLOR, alpha=_GRID_ALPHA, linewidth=0.6, zorder=0)
+        self.ax.set_axisbelow(True)
 
         # constrained_layout/tight_layout는 twinx로 바깥에 쌓인(outward-offset) 축들의 자리를
         # 안정적으로 계산하지 못해서(축이 여러 개일 때 라벨이 엉뚱한 자리로 튀는 현상을 실제로
@@ -307,6 +329,38 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.figure.subplots_adjust(left=left_margin, right=right_margin, bottom=0.22, top=0.92)
         self.draw()
         return skipped
+
+    def highlight_row_range(self, row_start: int, row_end: int) -> None:
+        """[row_start, row_end) 구간에 배경색을 칠해 그래프에서 어느 파일의 구간인지 표시한다.
+
+        `_reference_line`이 들고 있는, 실제로 그려질 때 이미 변환을 거친 x좌표
+        (`get_xdata(orig=False)`)를 그대로 재사용한다. `_on_point_double_click`과 같은
+        이유로 이렇게 해야 X축이 날짜/문자열이라 위치 인덱스로 대체된 경우에도(참고:
+        `plot_lines`) 항상 올바른 화면 위치를 가리킨다.
+        """
+        self._clear_highlight()
+        if self._reference_line is None or row_start >= row_end:
+            return
+        x_converted = np.asarray(self._reference_line.get_xdata(orig=False), dtype=float)
+        if row_start >= len(x_converted):
+            return
+        row_end = min(row_end, len(x_converted))
+        x_start = x_converted[row_start]
+        x_end = x_converted[row_end - 1]
+        self._highlight_span = self.ax.axvspan(x_start, x_end, color="#ffca28", alpha=0.25, zorder=0)
+        self.draw_idle()
+
+    def clear_highlight(self) -> None:
+        """구간 표시를 지운다. 표시된 게 없으면 아무 것도 하지 않는다."""
+        if self._highlight_span is None:
+            return
+        self._clear_highlight()
+        self.draw_idle()
+
+    def _clear_highlight(self) -> None:
+        if self._highlight_span is not None:
+            self._highlight_span.remove()
+            self._highlight_span = None
 
     def clear(self) -> None:
         self._reset_axes()

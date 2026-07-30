@@ -2,6 +2,20 @@
 
 세션/작업 단위로 무엇을 했는지 기록합니다. 릴리스 시점의 사용자 대상 변경 요약은 `CHANGELOG.md`를 참고하세요. 이 파일은 그보다 더 잘게, 작업할 때마다 남기는 개발 로그입니다.
 
+## 2026-07-30
+
+- 기능 추가(이전 세션에서 구현된 뒤 기록/커밋이 안 된 채 작업 트리에 남아있던 것을 뒤늦게 기록 후 커밋): 파일 목록 드래그로 순서 변경 + 파일 더블클릭 시 그래프에 해당 구간 하이라이트 표시
+  - `app/main_window.py`: `_FileListWidget`(`QListWidget` 서브클래스) 신설 — 내부 드래그로 항목 순서가 바뀌면 `order_changed`를 emit, 항목이 없는 빈 여백을 더블클릭하면 `empty_area_double_clicked`를 emit. `_combined_paths`(마지막으로 "결합하기"를 눌렀을 때의 파일 집합)와 `_file_row_ranges`(결합된 테이블에서 각 파일이 차지하는 [시작,끝) 행 구간)를 추가로 추적
+  - 드래그로 순서를 바꾸면(`_on_file_order_changed`) 열 구성이 그대로일 때 X/Y 선택을 유지한 채 새 순서로 재결합/재그리기, 열 구성이 달라지면 새로 고른 것과 동일하게 선택을 초기화(`_apply_combine`의 `reset_selection` 분기로 정리)
+  - 파일 목록에서 파일을 더블클릭하면(`_on_file_item_double_clicked`) 그 파일이 결합된 데이터에서 차지하는 행 구간을 그래프에 노란 배경(`axvspan`)으로 표시(`app/plot_canvas.py`의 `highlight_row_range`/`clear_highlight`), 빈 여백을 더블클릭하면 해제
+  - `app/plot_canvas.py`: `_highlight_span` 상태 추가, `_reset_axes()`가 `ax.clear()`로 함께 지워지는 것과 별도로 관리
+- UI 변경: 그래프 영역을 DAQsystem(INCA/CANalyzer 스타일) 그래프와 같은 톤으로 리스타일링(matplotlib 엔진과 기존 기능은 전부 그대로 유지 — 시각 스타일만 변경)
+  - `app/plot_canvas.py`: 커브 색상 팔레트를 DAQsystem `ui/main_window.py`의 `CURVE_PALETTE`와 동일한 값(`#2563eb`, `#d97706`, `#16a34a`, ...)으로 교체. `Figure`/`Axes` 배경을 명시적으로 흰색 고정, 옅은 회색 격자(`ax.grid(alpha=0.3)`, DAQsystem의 `pg.PlotWidget.showGrid(alpha=0.3)`과 동일한 톤) 추가, 범례 상자를 흰 배경+옅은 테두리로 스타일링(pyqtgraph `addLegend()`의 흰 범례 상자와 톤 맞춤)
+  - `app/theme.py`: 그래프 툴바(`QToolBar#PlotToolbar`)에 흰 배경 + 파란 강조 호버 QSS 추가(기존 matplotlib 기본 회색 툴바 대신 앱 전체 톤과 통일)
+  - `app/main_window.py`: `_plot_toolbar`에 `objectName("PlotToolbar")` 부여(위 QSS 스코프 지정용)
+  - 멀티 Y축, 범례 드래그, 축 더블클릭 편집, 그래프 포인트 더블클릭→테이블 행 선택, 구간 하이라이트, Figure options(Customize) 등 기존 기능은 코드 변경 없이 그대로 동작
+  - 오프스크린(`QT_QPA_PLATFORM=offscreen`) 렌더링으로 실제 데이터 로드→결합→그래프 표시까지 스모크 테스트 후 `widget.grab()` 캡처로 흰 배경/격자/팔레트 색/범례 스타일 적용 확인
+
 ## 2026-07-24
 
 - 버그 수정: 멀티 Y축(twinx로 만든 축이 2개 이상)일 때 범례 드래그가 전혀 동작하지 않던 문제 수정

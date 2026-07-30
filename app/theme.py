@@ -177,4 +177,27 @@ QWidget#PlotCard {
     border: 1px solid #E4E6EA;
     border-radius: 8px;
 }
+
+/* --- 그래프 툴바 (DAQsystem/INCA·CANalyzer 스타일 톤에 맞춘 깔끔한 흰 툴바) --- */
+QToolBar#PlotToolbar {
+    background-color: #FFFFFF;
+    border: none;
+    border-bottom: 1px solid #E4E6EA;
+    spacing: 2px;
+    padding: 4px;
+}
+QToolBar#PlotToolbar QToolButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px;
+}
+QToolBar#PlotToolbar QToolButton:hover {
+    background-color: #F1F4FA;
+    border-color: #4573D2;
+}
+QToolBar#PlotToolbar QToolButton:pressed,
+QToolBar#PlotToolbar QToolButton:checked {
+    background-color: #E4E6EA;
+}
 """
